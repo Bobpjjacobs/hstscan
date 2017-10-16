@@ -71,12 +71,12 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
             objects = sorted(objects, key=lambda obj: obj[-1])
             obj = objects[object_ind]
             #obj = min(objects, key=lambda obj: obj[-1]) # take brightest mag
-                        
+
             image_fname = data_dir+catalogue.split('_')[-3].split('/')[-1]+'_flt.fits'
             SEx, SEy = obj[1], obj[2]
             # Correction
-            #x,y = SEx, SEy
-            x,y = center_of_flux(image_fname, SEx, SEy, size=10)
+            x,y = SEx, SEy
+            #x, y = center_of_flux(image_fname, int(SEx), int(SEy), size=10)
 
             if debug:
                 print 'Direct image location:', x, y
@@ -101,15 +101,15 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
         elif line.startswith('DLDP_'+str(n)):
             nth_coeffs = line.split(' ')[1:]
             nth_coeffs = [float(coeff) for coeff in nth_coeffs if coeff != '']
-            DISP_COEFFS.append(nth_coeffs) 
+            DISP_COEFFS.append(nth_coeffs)
         elif line.startswith('DYDX_'+str(n)):
             nth_coeffs = line.split(' ')[1:]
             nth_coeffs = [float(coeff) for coeff in nth_coeffs if coeff != '']
-            TRACE_COEFFS.append(nth_coeffs)          
+            TRACE_COEFFS.append(nth_coeffs)
     assert len(DISP_COEFFS) == DISP_ORDER + 1, 'Coefficients and order do not match for dispersion.'
     assert len(TRACE_COEFFS) == TRACE_ORDER + 1, 'Coefficients and order do not match for trace.'
 
-    if disp_coef=='wilkins': 
+    if disp_coef=='wilkins':
         DISP_COEFFS[0][0] = 0.997*DISP_COEFFS[0][0]
         DISP_COEFFS[0][1] = 0.90*DISP_COEFFS[0][1]
         DISP_COEFFS[1][0] = 1.029*DISP_COEFFS[1][0]
@@ -126,7 +126,7 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     y = np.repeat(y,x_len).reshape(y_len,x_len)
     # Scale to ref pixel (inc. offsets)
     X = x - XREF # x wrt to (0,0), X wrt to (XREF,YREF)
-    Y0 = y - YREF 
+    Y0 = y - YREF
     # This is if the direct image didnt move, but it does, so account for it:
     BEAM_H = exp_time*scan_rate/pix_size*scan_direction # Height of beam w.r.t. to 0th direct image
     Y1 = y - YREF - BEAM_H
@@ -144,7 +144,7 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     def function(x_trace, x, y, ALL_COEFFS, plot_coeffs=False, debug=False):
         # x and y are the positions X, Y in the field dep. description
         # x_trace is then the distance in final polynomial along the BEAM or TRACE
-        # ALL_COEFFS is a list containing the coefficients to describe each of the field 
+        # ALL_COEFFS is a list containing the coefficients to describe each of the field
         #   dependent coefficients in the x_trace polynomial
         total_poly = np.zeros_like(x)
         for i, coeffs in enumerate(ALL_COEFFS):
@@ -182,7 +182,7 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     lengths = (np.roll(integrand,-1, axis=-1)+integrand)/2
     lengths = np.hstack([ np.zeros([len(TRACE),1]), lengths[:,:-1] ] ) # last element is meaningless
     sum_l = np.cumsum(lengths, axis=-1)
-    trace_l = sum_l - sum_l[:,np.round(XREF)]
+    trace_l = sum_l - sum_l[:,int(np.round(XREF))]
 
     if False:
         # Plot the trace and the direct image
@@ -221,7 +221,7 @@ def interp_flux_scale(scale, wave, flux):
     by 'scale' in the same way the the wavelengths are interpolated.
     Scale should be a 1D array
     Last axis of wave/flux should be interpolated (automatic for interp1d)
- 
+
     # scipy way
     extrapolator = f.extrap1d(wave,flux)
     return extrapolator(scale)
@@ -264,10 +264,10 @@ def get_corresp_ind(scale, waves):
     xs: waves without last column
 
     sum is slightly slower than count_nonzero with list comprehension
-    ''' 
+    '''
     xs = waves[:,:-1]
     #indexes = np.array([(s > xs).sum(1) for s in scale]).T
-    indexes = np.array([[np.count_nonzero(row) for row in (s>xs)] for s in scale]).T 
+    indexes = np.array([[np.count_nonzero(row) for row in (s>xs)] for s in scale]).T
     # indexes of the corresponding wavelengths, along rows
     return indexes
 
@@ -348,12 +348,3 @@ def flat_field_correct(waves, fluxes, flat_file = '/net/glados2.science.uva.nl/a
         ff_error = ff_coeff*np.power(x,i)
     FFHDU.close()
     return np.divide(fluxes, tot_ff), tot_ff, ff_error
-
-
-
-
-
-
-
-
-

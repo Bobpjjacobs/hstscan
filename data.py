@@ -1,4 +1,3 @@
-
 #provides all imports
 import my_fns as f
 from my_fns import pyfits, np, ds9, types, p, subprocess, os
@@ -12,6 +11,46 @@ reload(timecorr)
 """
 Data are stored in /net/glados2.science.uva.nl/api/jarcang1 directory, not backed up.
 """
+
+def read_conf_file(fname):
+    '''
+    Read in configuration options for pipeline.
+    Return a dictionary with values.
+    File should be tab delimited with # for comment lines.
+    '''
+    kwargs = {}
+    with open(fname, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line.startswith('#') and line.strip() != '':
+                key, val = line.split()
+                key, val = key.strip(), val.strip()
+                key = key.lower()
+                if val.lower() == 'none':
+                    val = None
+                elif val.lower() == 'nan':
+                    val = np.nan
+                elif val.lower() == 'true':
+                    val = True
+                elif val.lower() == 'false':
+                    val = False
+                elif key in ['n_masks','cr_tol','cr_sigma','cr_width','cr_thresh','dq_replace','s','v_0','q','s_clip','s_cosmic','fit_tol']:
+                    val = float(val)
+                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind']:
+                    val = int(val)
+                elif key == 'dq_flags':
+                    # 4: Bad detector pixel, 32: Unstable photometric response, 512: Bad flat field
+                    val = val[1:-1].split(',')
+                    val = [ int(v) for v in val ]
+                elif key == 'cr_replace':
+                    try: val = float(val)
+                    except ValueError: pass # string
+                else:
+                # unexpected config parameter
+                    try: val = float(val)
+                    except ValueError: pass
+                kwargs[key] = val
+    return kwargs
 
 def obj_ds9(obj):
     '''
@@ -225,7 +264,7 @@ class Single_ima():
         self.SCI.data = self.SCI.data[:-n,:-n]
         self.ERR.data = self.ERR.data[n:,n:]
         self.ERR.data = self.ERR.data[:-n,:-n]
-        if self.DQ.data != None:
+        if type(self.DQ.data) != 'NoneType':
             self.DQ.data[mask] = replace
             self.DQ.data = self.DQ.data[n:,n:]
             self.DQ.data = self.DQ.data[:-n,:-n]
@@ -296,7 +335,7 @@ class Data_ima(BasicFits):
     Creates object containing all the reads from the ima file.
     '''
 
-    def __init__(self,filename):
+    def __init__(self,filename,bjd=True):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -315,17 +354,21 @@ class Data_ima(BasicFits):
             RA, DEC = HDUList[0].header['RA_TARG'], HDUList[0].header['DEC_TARG']
 
             # Now do the timing corrections
-            # jd -> bjd
-            bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '/home/jacob/Project_1/js41_hst.vec')
+            if bjd:
+                # jd -> bjd
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '/home/jacob/Project_1/js41_hst.vec')
 
-            # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
-            # utc -> tdb
-            tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
-            dt = bjd_dt + tdb_dt
-            self.t = jd_utc + dt/60./60./24. # in days
-            self.dt = dt # timing offset in seconds
-            self.t_units = 'BJD_TT'
-
+                # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
+                # utc -> tdb
+                tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
+                dt = bjd_dt + tdb_dt
+                self.t = jd_utc + dt/60./60./24. # in days
+                self.dt = dt # timing offset in seconds
+                self.t_units = 'BJD_TT'
+            else:
+                self.t = jd_utc
+                self.dt = 0
+                self.t_units = 'JD_UTC'
 
             # Store these in the header
             self.Primary.header['t'] = (self.t, 'calculated time')
@@ -1048,32 +1091,32 @@ def clean_grism_drz(system='WASP-18', data_dir='/home/jacob/hst_data/'):
                     os.remove(data_dir+system+'/'+file)
     print('{} files removed'.format(number))
 
-def make_driz_list(system='GJ-1214', data_dir='/home/jacob/hst_data/'):
+def make_driz_list(data_dir='/home/jacob/hst_data/'):
     '''
     Collect a list of all the drizzle combined images from visits.
     Identify visists as those with more than one exposure used in drizzle.
     '''
-    f.silentremove(data_dir+system+'/visit_driz.lis')
-    with open(data_dir+system+'/visit_driz.lis','w') as g:
-        for file in os.listdir(data_dir+system):
+    f.silentremove(data_dir+'/visit_driz.lis')
+    with open(data_dir+'/visit_driz.lis','w') as g:
+        for file in os.listdir(data_dir):
             if file.endswith('_drz.fits'):
-                with pyfits.open(data_dir+system+'/'+file, memmap=False) as HDU:
+                with pyfits.open(data_dir+'/'+file, memmap=False) as HDU:
                     if HDU[0].header['FILTER'].startswith('F'):
                         g.write(file+'\n')
 
 
-def make_input_image_list(system='GJ-1214', data_dir='/home/jacob/hst_data/'):
+def make_input_image_list(data_dir='/home/jacob/hst_data/'):
     os.nice(20)
     all_lines = []
-    for file in os.listdir(data_dir+system):
+    for file in os.listdir(data_dir):
         if file.startswith('visit') and file.endswith('.lis'):
-            with open(data_dir+system+'/'+file, 'r') as g:
+            with open(data_dir+file, 'r') as g:
                 lines = g.readlines()
             lines = [line for line in lines if not line.startswith('#')]
             for line in lines:
                 all_lines.append(line)
     all_lines.sort()
-    output = data_dir+system+'/input_image.lis'
+    output = data_dir+'/input_image.lis'
     f.silentremove(output)
     with open(output, 'w') as g:
         for line in all_lines:
@@ -1087,12 +1130,12 @@ def make_input_image_lists(output, input_file=None, system='GJ-1214', data_dir='
     #for no in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10','11', '12', '13', '14', '15']:
     nos = []
     if input_file is None:
-        for file in os.listdir(data_dir+system):
+        for file in os.listdir(data_dir):
             if file.startswith(prop_str) and file.endswith('_ima.fits'):
                 nos.append(file[4:6])
 
     else:
-        with open(data_dir+system+'/'+input_file, 'r') as g:
+        with open(data_dir+input_file, 'r') as g:
             lines = g.readlines()
             lines = [ line.strip() for line in lines ]
             for file in lines:
@@ -1104,12 +1147,12 @@ def make_input_image_lists(output, input_file=None, system='GJ-1214', data_dir='
         print 'Starting visit', no
         j = 0
         line_dat = []
-        for file in os.listdir(data_dir+system):
+        for file in os.listdir(data_dir):
             if file.startswith(prop_str+no) and file.endswith('_ima.fits'):
 
                 j += 1
                 print 'Starting file', j, 'for visit', no
-                exp = load(data_dir+system+'/' + file)
+                exp = load(data_dir + file)
                 t = exp.t
                 filt = exp.Primary.header['FILTER']
                 rootname = exp.Primary.header['ROOTNAME']
@@ -1255,3 +1298,81 @@ def emcee_chain_reader(fname):
             chain[j,step,:] = position
             if j == nwalkers-1: step += 1
     return {'chain':chain, 'coefs_names':coefs_names, 'nwalkers':nwalkers, 'ndim':ndim, 'nsteps':nsteps}
+
+
+
+##########################
+####### Orbit cats #######
+##########################
+
+def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'):
+    '''
+    Fit a gaussian to direct image to create visit catalogue.
+    Use same format as SExtractor for catalogue files.
+    '''
+    from lmfit import minimize, Parameters
+    import astropy
+    from astropy import modeling
+
+    data_dir = source_dir
+    if not os.path.exists(data_dir+'input_image.lis'):
+        make_input_image_list(data_dir=source_dir)
+    if not os.path.exists(data_dir+'visit_driz.lis'):
+        make_driz_list(data_dir=source_dir)
+
+    Gaussian2D = astropy.modeling.functional_models.Gaussian2D
+
+    with open(data_dir+'visit_driz.lis', 'r') as driz_list:
+        for line in driz_list:
+            fname = line[:-1]
+            dest_file = data_dir + fname.split('_')[0]+'_flt_1.cat'
+            flt_fname  = data_dir + fname.split('_')[0]+'_flt.fits'
+
+            di = data.load(flt_fname)
+            image = di.SCI.data.copy()
+
+            params = Parameters()
+            params.add_many(('amplitude', np.max(image), True, 0.), \
+                            ('x_mean', image.shape[1]/2, True, 0, image.shape[1]), \
+                            ('y_mean', image.shape[0]/2, True, 0, image.shape[1]), \
+                            ('x_stddev', 10, True, 0), ('y_stddev', 10, True, 0))
+
+            size = image.shape[0]
+            x = np.repeat(np.arange(0,size),size).reshape(size,size).T
+            y = np.repeat(np.arange(0,size),size).reshape(size,size)
+
+            def residuals(params, image, x, y):
+                model = Gaussian2D.evaluate(x, y, amplitude=params['amplitude'], x_mean=params['x_mean'], y_mean=params['y_mean'], \
+                                            x_stddev=params['x_stddev'], y_stddev=params['y_stddev'], theta=0)
+                return (image - model).flatten()
+
+            out = minimize(residuals, params, args=(image, x, y))
+            params = out.params
+            fit_params = params
+
+            params.pretty_print()
+            view(image, show=False, cmap='binary_r')
+            p.title(fname)
+            ax = p.gca()
+            ax.set_autoscale_on(False)
+            p.plot(params['x_mean'].value, params['y_mean'].value, marker='x', color='r')
+            p.xlim([params['x_mean'].value-25, params['x_mean'].value+25])
+            p.ylim([params['y_mean'].value-25, params['y_mean'].value+25])
+            p.show()
+
+            x_image, y_image = fit_params['x_mean'].value, fit_params['y_mean'].value
+            x_std, y_std = fit_params['x_stddev'].value, fit_params['y_stddev'].value
+
+            line = '\t'.join(['1', str(x_image), str(y_image), '0', '0', \
+                        str(x_std), str(y_std), '0.0', '0', '0', '0', '0.0']) + '\n'
+
+            with open(dest_file, 'w') as g:
+                g.write('# 1  NUMBER  Running object number\n# 2  X_IMAGE  Object position along x  [pixel]\n')
+                g.write('# 3  Y_IMAGE  Object position along y  [pixel]\n# 4  X_WORLD  Barycenter position along world x axis  [deg]\n')
+                g.write('# 5  Y_WORLD  Barycenter position along world y axis  [deg]\n# 6  A_IMAGE  Profile RMS along major axis  [pixel]\n')
+                g.write('# 7  B_IMAGE  Profile RMS along minor axis  [pixel]\n# 8  THETA_IMAGE  Position angle (CCW/x)  [deg]\n')
+                g.write('# 9  A_WORLD  Profile RMS along major axis (world units)  [deg]\n# 10 B_WORLD  Profile RMS along minor axis (world units)  [deg]\n')
+                g.write('# 11 THETA_WORLD  Position angle (CCW/world-x)  [deg]\n# 12 MAG_F1384  Kron-like elliptical aperture magnitude  [mag]\n')
+
+                g.write(line)
+            # catalogue create for direct image
