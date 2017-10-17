@@ -348,62 +348,29 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
         new_subs = []
         for subexposure in subexposures:
             #CR_clean, CR_mask = r.clean_cosmic_rays(subexposure.SCI.data, np.sqrt(subexposure.SCI.data), tol=t.cr_tol, replace=t.cr_replace, debug=False)
-            CR_clean, CR_mask = r.spatial_median_filter(subexposure.SCI.data.copy(), subexposure.DQ_mask, tol=t.cr_tol, replace=t.cr_replace, debug=False, thresh=t.cr_thresh, read_noise=t.read_noise, sx=t.cr_x, sy=t.cr_y)
+            # Mask everything outside of 1st order
+            if t.dispersion:
+                x1 = int(subexposure.x_order)+10
+                x2 = int(subexposure.x_order)+197 # 192-15 is the length of the first order BEAM
+                mask_0 = np.zeros_like(subexposure.SCI.data)
+                mask_0[:,:x1+1] = 1.
+                mask_0[:,x2:] = 1.
+                ignore_mask = np.logical_or(subexposure.DQ_mask, mask_0)
+            else:
+                ignore_mask = subexposure.DQ_mask
 
-            view(CR_mask, cmap='binary_r', cbar=False,show=False)
-            p.axis('off')
-            p.show()
+            CR_clean, CR_mask = r.spatial_median_filter(subexposure.SCI.data.copy(), ignore_mask, tol=t.cr_tol, replace=t.cr_replace, debug=False, \
+                                    thresh=t.cr_thresh, read_noise=t.read_noise, sx=t.cr_x, sy=t.cr_y)
 
-            assert np.count_nonzero(np.logical_and(CR_mask, DQ_mask)) == 0, 'Some DQ bad pixels have been masked as CRs'
+
+            assert np.count_nonzero(np.logical_and(CR_mask, subexposure.DQ_mask)) == 0, 'Some DQ bad pixels have been masked as CRs'
             n_crs = np.count_nonzero(CR_mask)
-            if t.cr_plot and False:
-                copy1 = subexposure.SCI.data.copy()
-                copy1[subexposure.DQ_mask] = np.nan
-                if False:
-                    p.subplot(1,2,1)
-                    view(copy1, cbar=False, show=False, title='Image')
-                    p.subplot(1,2,2)
-                    view(CR_mask, cmap='binary_r', cbar=False, show=False, title='CR Mask: {}'.format(n_crs))
-                    p.tight_layout()
-                    p.show()
-                # and a zoom on spectrum
-                xpix, ypix = x_order + int((192-15)/2.), y_order
-                if ypix-t.psf_h < 0: y1=0; y2=t.psf_h
-                elif ypix+t.psf_h > subexposure.SCI.data.shape[0]: y1=-t.psf_h; y2=None
-                else: y1 = ypix-t.psf_h/2; y2=ypix+t.psf_h/2
-                if xpix-75 < 0: x1=0; x2=150
-                elif xpix+75 > subexposure.SCI.data.shape[1]: x1=-150; x2=None
-                else: x1 = xpix-75; x2=xpix+75
-                copy2 = subexposure.SCI.data[y1:y2,x1:x2].copy()
-                dq2 = subexposure.DQ_mask[y1:y2,x1:x2]
-                copy2[dq2] = np.nan
-                p.subplot(1,3,1)
-                view(copy2, cbar=False, show=False, title='Before')
-                '''
-                ax = p.gca()
-                ax.set_autoscale_on(False)
-                for y, row in enumerate(subexposure.DQ_mask):
-                    for x, pix in enumerate(row):
-                        if pix == 1: p.plot(x,y,marker='o',mec='w',mfc='None', ms=1)
-                '''
-                p.subplot(1,3,2)
-                view(CR_mask[y1:y2,x1:x2], cmap='binary_r', cbar=False, show=False, title='CR Mask: {}'.format(np.count_nonzero(CR_mask[y1:y2,x1:x2])))
-                p.subplot(1,3,3)
-                copy3 = CR_clean[y1:y2,x1:x2].copy()
-                copy3[dq2] = np.nan
-                #view(copy2-copy3, cbar=False, show=False, title='Difference ({:.0f} to {:.0f} e-)'.format(np.nanmin(copy2-copy3), np.nanmax(copy2-copy3)))
-                view(copy3, cbar=False, show=False, title='After')
-                p.tight_layout()
-                p.show()
+
             subexposure.SCI.data = CR_clean
             #n_crs = np.count_nonzero(CR_mask[ypix-t.psf_h/2:ypix+t.psf_h/2,xpix-100:xpix+100])
             subexposure.n_crs = n_crs
             subexposure.CR_mask = CR_mask
-            if n_crs > 10:
-                #logger.warning('Subexposure {}, large number of CRs detected after flat-fielding: {}'.format(i+1, n_crs))
-                pass
-            else:
-                logger.info('Removed {} CRs pixels from subexposure {}'.format(n_crs,i+1))
+            logger.info('Removed {} CRs pixels from subexposure {}'.format(n_crs,i+1))
             if t.dq_replace != 'median':
                 subexposure.mask = np.logical_or(DQ_mask, CR_mask)
             else:
@@ -420,13 +387,90 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                         if CR_mask[j,k]: p.plot(k, j, marker='o', mec='r', mfc='None')
                 p.title('{} crs'.format(n_crs))
                 p.show()
+            new_subs.append(subexposure)
+        if t.debug:
+            # Plot number of CRs over subexposures
+            # and plot cr distribution in x and y (?)
+            n_crs = [subexposure.n_crs for subexposure in subexposures]
+            p.bar(np.arange(len(n_crs)), n_crs, width=1., edgecolor='k')
+            p.title('Number of CRs / subexposure')
+            p.ylabel('Cosmic Rays')
+            p.xlabel('Subexposure number')
+            p.show()
 
+            CR_masks = [ subexposure.CR_mask for subexposure in subexposures ]
+            x_count = np.sum([ np.sum(mask, axis=0) for mask in CR_masks ], axis=0)
+            p.subplot(2,1,1)
+            p.title('Distribution of CRs over pixels')
+            p.bar(np.arange(CR_masks[0].shape[0]), x_count, width=1.)
+            p.xlabel('x pixel')
+            p.subplot(2,1,2)
+            y_count = np.sum([ np.sum(mask, axis=1) for mask in CR_masks ], axis=0)
+            p.bar(np.arange(CR_masks[0].shape[0]), y_count, width=1.)
+            p.xlabel('y pixel')
+            p.tight_layout()
+            p.show()
+        subexposures = new_subs
 
-        else:
+    else:
+        new_subs = []
+        for subexposure in subexposures:
             subexposure.mask = DQ_mask
             subexposure.n_crs = 0
             subexposure.CR_mask = np.zeros_like(subexposure.SCI.data).astype(bool)
             subexposure.SCI.header['CRs'] = (0, 'Number of crs detected in box (local median)')
+            new_subs.append(subexposure)
+        subexposures = new_subs
+
+    # Background removal
+    if t.bg:
+        if t.bg_plot:
+            pdf_file = t.source_dir+t.system+'/logs/'+exposure.rootname+'_bg.pdf'
+            f.silentremove(pdf_file)
+            pdf = PdfPages(pdf_file)
+        new_subs = []
+        for i, subexposure in enumerate(subexposures):
+            # Reduce the subexposure
+            logger.info('Subexposure {}'.format(i+1))
+
+            if t.bg:
+                # Using masks for spectrum and background stars
+                if t.scanned: psf_h = None
+                else: psf_h = t.psf_h
+                bg, bg_err = r.calc_subexposure_background(subexposure, method='median', masks=t.n_masks, debug=t.bg_plot, neg_masks=t.neg_masks, mask_h=t.mask_h, psf_w=t.psf_w, psf_h=psf_h, show=True)
+                if t.bg_plot and t.bg_pdf:
+                    p.tight_layout()
+                    pdf.savefig()
+                    p.close()
+                elif t.bg_plot: p.show()
+
+                # Using a fixed area of the detector to calculate bg mean
+                #bg, bg_err = r.area_bg(subexposure.SCI.data, row=(0,15), col=(130,148), psf_h=t.psf_h, debug=t.bg_plot, pix=None) # Laura's area
+                #bg = r.area_bg(subexposure.SCI.data, row=(15,30), col=(130,148), psf_h=t.psf_h, debug=t.debug, pix=subexposure.ypix) # New area
+                #bg = r.area_bg(subexposure.SCI.data, row=(subexposure.ypix-120,subexposure.ypix-105), col=(100,115), psf_h=t.psf_h, debug=t.debug, pix=subexposure.ypix) # Drift area, traces pixel variations :/
+
+                # eclipse 4
+                #bg = r.rectangle_bg(subexposure.SCI.data, row=[180,210], col=[200,250], debug=t.debug)
+                # eclipse 1
+                #bg = r.rectangle_bg(subexposure.SCI.data, row=[0,5], col=[50,250], debug=t.debug)
+
+                bg = np.ones_like(subexposure.SCI.data)*bg
+                logger.info('Background median found to be {} electrons per pixel'.format(np.nanmedian(bg)))
+                if np.nanmedian(bg) > 50:
+                    logger.warning('Large background of {} electrons per pixel found in subexposure {}'.format(np.nanmedian(bg), i))
+                elif np.nanmedian(bg) == 0.:
+                    logger.warning('Background of 0 electrons per pixel found in subexposure {}'.format(i+1))
+
+            else:
+                bg = np.zeros_like(subexposure.SCI.data)
+                bg_err = 0.
+
+            subexposure.SCI.data += -bg
+            subexposure.bg = bg
+            subexposure.bg_err = bg_err
+            subexposure.SCI.header['BG'] = np.median(bg)
+            subexposure.SCI.header['BG_ERR'] = bg_err
+
 
     logger.info('Time taken: {}'.format(time.time()-t0))
     print 'Reduction took {:.2f}s'.format(time.time()-t0)
