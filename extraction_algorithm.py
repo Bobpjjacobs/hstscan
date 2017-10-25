@@ -50,7 +50,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 def estimate_spectrum(D,S,V):
     '''
     Find the estimated spectrum and variance given the image data.
-    Returns spectrum and spectrum variance.    
+    Returns spectrum and spectrum variance.
     '''
     return np.nansum(D-S, axis=0), np.nansum(V, axis=0)
 
@@ -115,7 +115,7 @@ def clip_cosmic(D, f, P, S, V, s_clip, M):
             if col > val and M[i,j]:
                 val = col
                 ind = (i,j)
-    
+
     #ind = (flat_ind // X.shape[1], flat_ind % X.shape[1])
     # index of the maximum, have to convert from the flattened array index
     thresh = s_clip**2
@@ -179,7 +179,7 @@ def weight_function(coef, x, distn, weights, func_type, method):
     '''Function to be minimized.'''
     diff = distn - fn_dict[func_type](x, coef)
     weighted = diff * weights
-    
+
     if method == 'lsq':
         return weighted
     else:
@@ -199,13 +199,13 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
     #weights[np.logical_or(np.isnan(weights), np.isinf(weights))]= 0
     weights[ outliers ] = 0 # ignore outlier pixels
     weights = weights / np.sum(weights)
-    assert np.count_nonzero(V_l<0) == 0, 'Pixels exist with negative variances {}'.format(V_l) 
-    assert np.count_nonzero(weights<0) == 0, 'Pixels exist with negative weights {}'.format(weights) 
+    assert np.count_nonzero(V_l<0) == 0, 'Pixels exist with negative variances {}'.format(V_l)
+    assert np.count_nonzero(weights<0) == 0, 'Pixels exist with negative weights {}'.format(weights)
 
     if func_type == 'spline':
         if not tol is None: tol = np.mean(distn)*tol # set the tolerance to n% of the mean flux?
         if tol <= 0 or tol is None: tol=len(distn); logger.warning('Tolerance set to default in spline fit for column {}'.format(i))
-    
+
         if debug and full_debug: print 'Tolerance set to:', tol
         if not order: order = 2
         if np.all(weights == np.zeros_like(weights)): print 'panic'
@@ -217,13 +217,13 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
         residual = results.get_residual()
         success = residual < tol*1.1
         j = 1
-        while not success: 
+        while not success:
             # Try iterating a few more times
             results.set_smoothing_factor(tol)
             fit = my_fns.spline(x, results)
             residual = results.get_residual()
             success = residual < tol*1.1
-            if np.any(np.isnan(fit)): 
+            if np.any(np.isnan(fit)):
                 logger.info('Fitting failed, NaN outputs... interrupted column {}.'.format(i))
                 success = False
                 break
@@ -274,7 +274,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
                 return np.sum(np.abs(np.array(temp1)-np.array(temp2)))
 
             coefs0 = np.hstack((nodes, poly_coefs.flatten()))
-            #results = optimize.leastsq(fit_fn, coefs0, full_output=1, ftol=tol)            
+            #results = optimize.leastsq(fit_fn, coefs0, full_output=1, ftol=tol)
             results = optimize.fmin_slsqp(fit_fn, coefs0, f_eqcons=check_cts, acc=1e-4, iter=200, full_output=1, iprint=0)
             coefs, success = results[0], results[-2] == 0
             coefs = (coefs[:n_knots], coefs[n_knots:].reshape(n_knots-1, order+1))
@@ -320,7 +320,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
         start = 10
         end = 50
 
-        x_l1, y_l1, w_l1 = x[:start], distn[:start], weights[:start]     
+        x_l1, y_l1, w_l1 = x[:start], distn[:start], weights[:start]
         x_l2, y_l2, w_l2 = x[end:], distn[end:], weights[end:]
         x_sp, y_sp, w_sp = x[start:end], distn[start:end], weights[start:end]
         if len(x_sp) < 4:
@@ -385,8 +385,9 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         n_figs = 0 # number of figures stored in pdf
         p.figure() # get started
 
-    if bg_array != None and not np.any(bg_array == 0):
-        col_bg = np.median(bg_array, axis=0)
+    if type(bg_array) != type(None):
+        if not np.any(bg_array == 0):
+            col_bg = np.median(bg_array, axis=0)
     else:
         col_bg = [None]*D.shape[1]
 
@@ -395,7 +396,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
 
     for i in range(D.shape[1]):
         # iterate along columns (wavelengths) of the IMAGE
-        
+
         #print('#################\n'+'Spectral pixel {}'.format(i)+'\n#################')
         count, loop = 0, True
 
@@ -413,7 +414,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             # M has 0 where there is a bad pixel, otherwise 1
             M_l = M[:,i]
             outliers = np.logical_not(M_l)
-        
+
         while loop:
         # loop over sigma clipping procedure until can ignore all outlier pixels
             count += 1
@@ -440,7 +441,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                 if func_type == 'spline':
                     success, coef = results # this is actually a spline object
                 elif func_type == 'custom_spline':
-                    coef, success = results    
+                    coef, success = results
                 elif func_type == 'split_spline':
                     coef  = results[:-1]
                     x = results[-1] # split into 3 parts
@@ -455,7 +456,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     success = results['success']
                     #print success
                 if not success:
-                    if func_type != 'spline': 
+                    if func_type != 'spline':
                         logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
                         P_l = np.ones_like(distn)
                     else:
@@ -463,7 +464,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                             logger.info('Optimal extraction fitting failed (col {}), using previous column fit'.format(i))
                             results = old_results
                             success, coef = old_results
-                            assert success and coef != None, 'Previous fits also failed' 
+                            assert success and coef != None, 'Previous fits also failed'
                             P_l = my_fns.spline(x, coef)
                             #p.plot(P_l, color='b')
                             #p.plot(distn, marker='x',ls='None',color='g')
@@ -540,9 +541,9 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     p.plot(j, point, marker='x', color='g', label='Smoothed', ls='None')
                     ax = p.gca()
                     ax.set_autoscale_on(False)
-                    if np.any(dq_l == 0): 
+                    if np.any(dq_l == 0):
                         p.plot(-1,0,marker='o', mec='k', mfc='k', ls='None', label='DQ pixels')
-                    if np.any(cr_l == 0): 
+                    if np.any(cr_l == 0):
                         p.plot(-1,0,marker='o', mec='y', mfc='y', ls='None', label='CR pixels')
                     if np.any(np.logical_not(M_l) != new_outliers):
                         print np.count_nonzero(np.logical_not(M_l) != new_outliers), ' pixels clipped'
@@ -562,7 +563,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     p.legend(loc=0, fontsize='small')
 
                     # Plot the residuals
-                    
+
                     p.subplot(2,2,n_figs+2)
                     residuals = (distn - P_l_unscaled)
                     rms = np.sqrt(np.mean(residuals**2))
@@ -590,9 +591,9 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                         fig = p.figure(1)
                         fig.set_canvas(p.gcf().canvas)
                         n_figs=0
-                    # coef0 = coef 
+                    # coef0 = coef
                     # could keep old fit, risk of negative feedback
-                    
+
                 loop = False
                 # done!
             else:
@@ -701,7 +702,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     else:
         M = np.ones_like(D)
 
-    
+
     if not k is None and False:
         # Now do a median smooth along each row
         smooth_spec = []
@@ -710,7 +711,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
             smooth_spec.append(row)
         view(D - np.vstack(smooth_spec))
         D = np.vstack(smooth_spec)
-    
+
     if not k is None and False:
         # Now do a median smooth along each column
         n_smoothloops = 2
@@ -806,11 +807,6 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     if hasattr(pdf, 'close'):
         pdf.close()
         del pdf
-    
+
 
     return f, fV, P, V
-
-
-
-
-

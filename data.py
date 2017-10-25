@@ -170,6 +170,9 @@ class Single_ima():
             except AttributeError:
                 raise_wtih_traceback(InputError('The file has no DQ data or mask.'))
 
+        '''
+        Replaced is_bad and binary string bad pixel identification with list
+        comprehension and simple check, about 20x faster
         #convert integers to position in 16 bit binary string
         bin_flags = []
         for flag in int_flags:
@@ -186,6 +189,9 @@ class Single_ima():
         is_bad = np.vectorize(is_bad)
 
         mask = is_bad(self.DQ.data)
+        '''
+        mask = np.sum([ self.DQ.data/flag % 2 == 1 for flag in int_flags ], axis=0).astype(bool)
+
         self.mask = mask
         if replace == 'mean':
             self.SCI.data[mask] = np.nan

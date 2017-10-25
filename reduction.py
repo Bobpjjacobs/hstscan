@@ -152,7 +152,7 @@ def calc_subexposure_background(subexposure, method='median', debug=False, masks
         copy[copy<mu-ns*s] = np.nan
         vmin, vmax = np.nanmin(copy), np.nanmax(copy)
         view(copy, show=False, vmin=vmin, vmax=vmax, units='electrons')
-        view(image, title='Background pixels image', alpha=0.2, cbar=False, vmin=vmin, vmax=vmax)
+        view(image, title='Background pixels image', alpha=0.2, cbar=False, vmin=vmin, vmax=vmax, show=False)
         # '({:.0f}:{:.0f})'.format(mu0-ns*s0,mu0+ns*s0
         p.subplot(1,2,2)
         p.title('median {:.2f}, std {:.2f}'.format(np.median(bgdata),np.std(bgdata)))
@@ -163,9 +163,10 @@ def calc_subexposure_background(subexposure, method='median', debug=False, masks
         hist, bedges = np.histogram(bgdata, bins=20)
         width = bedges[1]-bedges[0]
         #p.hist(bgdata, bins=20)
-        p.bar(bedges[:-1], hist, width=width)
+        p.bar(bedges[:-1]+np.mean(np.diff(bedges))/2., hist, width=width)
         area = np.sum(hist)*width
         p.plot(x, gauss*np.sum(hist*width), color='k', lw=2)
+        p.tight_layout()
         if show: p.show()
 
         #for i, mask in enumerate(all_masks):
