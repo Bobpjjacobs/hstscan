@@ -7,6 +7,8 @@ import batman, logging, time
 from scipy.optimize import leastsq
 view = data.view_frame_image
 from matplotlib.backends.backend_pdf import PdfPages
+import astropy.constants as cs
+import pyfits
 
 # Analysis of data
 
@@ -59,12 +61,45 @@ def reduced_read(read,bg=0, replace=np.NAN, units=True, CCDgain=2.5, int_flags=[
     return read, mask
 
 # This finds the difference between two adjacent (in time) reads.
-def create_sub_exposure(read1, read2, read_noise=20):
+def create_sub_exposure(read1, read2, read_noise=20, nlincorr=False, nlinfile='/home/jacob/hstscan/src/calibration/u1k1727mi_lin.fits'):
     '''
     Simply subtract the two reads,
     time ordered.
+    Perform non-linearity correction for saturated pixels (since they are excluded from the default calibration)
     '''
-    # this is basically coded into the read objects
+    if nlincorr: # perform non-linearity correction for saturated pixels
+
+        # If we use the saturation flag from the DQ info, will double correct
+        #sat1 = (read1.DQ.data/256 % 2).astype(bool) # 256 is the flag for saturation
+        #sat2 = (read2.DQ.data/256 % 2).astype(bool)
+        # Try to just get the non-corrected pixels (about >78,000 electrons)
+        # http://www.stsci.edu/hst/wfc3/documents/handbooks/currentIHB/c05_detector8.html
+        sat1 = read1.SCI.data > 7.8e4
+        sat2 = read2.SCI.data > 7.8e4
+
+        nln = pyfits.open(nlinfile)
+        c1 = nln[1].data; c2 = nln[2].data; c3 = nln[3].data; c4 = nln[4].data
+        size = read1.SCI.data.shape[0]
+        fullsize = c1.shape[0]
+        c1,c2,c3,c4 = map(lambda c: c[(fullsize-size)/2:-(fullsize-size)/2,(fullsize-size)/2:-(fullsize-size)/2], [c1,c2,c3,c4])
+        
+        read1corr, read2corr = map(lambda f: (1+c1+c2*f+c3*f*f+c4*f*f*f)*f, [read1.SCI.data, read2.SCI.data])
+        
+        read1.SCI.data = np.where(sat1, read1corr, read1.SCI.data)
+        read2.SCI.data = np.where(sat2, read2corr, read2.SCI.data)
+
+        if False:
+            p.subplot(1,2,1)
+            view(read1.SCI.data, show=False, cbar=False)
+            p.subplot(1,2,2)
+            view(sat1, cmap='binary_r', cbar=False)
+
+            pixels = read1.SCI.data[sat1]
+            p.hist(pixels, color='r')
+            p.show()
+
+
+    # making subexposures is basically coded into the read (Single_ima) class
     if read2.SCI.header['ROUTTIME'] > read1.SCI.header['ROUTTIME']:
         sub = read2 - read1
     else:
@@ -425,6 +460,9 @@ IR spectra have blobs of low sensitivity on the channel select mirror.
 These can disperse background light in to spectra on the image.
 Having rows with blobs on is therefore not only bad due to having to rescale the flux
 when there are many pixels masked out but also will include a background spectrum super imposed.
+
+These are marked by 512? in the DQ array, but cannot interpolate over them 
+so probably best to just leave them and ignore the rows that are overly effected
 '''
 
 def blobs(mask):
@@ -458,313 +496,43 @@ def has_blobs(mask, tol=4):
 ########################################
 #          Detect Cosmic Rays          #
 #             Local median             #
-#            Sliding median            #
 ########################################
 
-# Local median array #
 
-def create_median_image(image, befimage=None, aftimage=None, method='space'):
+def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, thresh=500, replace='median', debug=False, mask_dq=False):
     '''
-    Creates a new image where each pixel is the median of the neighbouring pixels
-    in the original image.
-    Done by iterating through each pixel so is incredibly slow.
+    Filter cosmic rays by using a local median of pixels
+    First compute median in x and y, using sx and sy number of pixels either side
+    Then check if pixel is greater than tol sigma above the median for both x and y
+    If above, then replace with NaN or median
 
-    If method is space, takes local median in image.
-    If method is time, takes median of adjacent pixels in time
-    '''
-    # can parse all the 3 images in a list
-    # better not have any 3x3 images
-    if len(image) == 3:
-        images = image
-        befimage, image, aftimage = image
-    else:
-        images = [befimage, image, aftimage]
+    Can input an array of pixels to ignore when checking for cosmic rays (dq_mask, bool)
 
-    # list of neighbours, really need to find a better way of doing this
-    neigh_list = [(1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1),(0,-1),(1,-1)]
-
-    medimage = np.empty(image.shape)
-    it = np.nditer(image, flags=['multi_index'])
-    # store list of neighbouring pixels
-    while not it.finished:
-        found, neigh = True, []
-        for step in neigh_list:
-        # try to access element, if it doesn't exist pass
-            try:
-                if method == 'space':
-                    neigh_index = f.to_tuple(np.add(it.multi_index,step))
-                    neigh.append(image[neigh_index])
-                elif method == 'time':
-                    # more complicated, first positional value is 'height'
-                    # or spatial pixel
-                    # second is time, so before present or future.
-                    src_image, h = images[step[0]], step[1]
-                    neigh_index = f.to_tuple(np.add(it.multi_index,(h,0)))
-                    neigh.append(src_image[neigh_index])
-            except IndexError:
-                # edge of array
-                pass
-        medimage[it.multi_index] = np.nanmedian(neigh)
-        it.iternext()
-    return medimage
-
-def create_median_image2(image, s=2, befimage=None, aftimage=None, method='space'):
-    '''
-    Creates a new image where each pixel is the median of the neighbouring pixels
-    in the original image.
-    Done by using array manipulation over pixel iteration in an attempt to
-    speed up the process.
-    s = separation of neighbouring pixels
-    '''
-    assert len(image.shape) == 2, 'Input should be a 2D array'
-    assert method=='space' and befimage==None and aftimage==None, 'Does not support time median'
-
-    # Roll the arrays in the x and y direction, then take median.
-    # How to handle edges? Repeat endpoints.
-    image_stacks = []
-    for spatial in range(-s,s+1,1): # 0 spatial, 1 spectral
-        one_roll = np.roll(image, spatial, axis=0)
-        for spectral in range(-s,s+1,1):
-            if spatial == 0 and spectral == 0:
-                continue # dont use the pixel in question
-            new_image = np.roll(one_roll, spectral, axis=1)
-            #view(new_image - image, title='{}_{}'.format(axis, shift))
-            if spatial > 0:
-                new_image[:s,:] = image[:s,:]
-            elif spatial < 0:
-                new_image[-s:,:] = image[-s:,:]
-            if spectral > 0:
-                new_image[:,:s] = image[:,:s]
-            elif spectral < 0:
-                new_image[:,-s:] = image[:,-s:]
-            image_stacks.append(new_image)
-    medimage = np.nanmedian(image_stacks, axis=0)
-    stdimage = np.std(image_stacks, axis=0)
-    return medimage, stdimage
-
-def cr_mask(image, diff, tol, replace=np.NAN):
-    '''
-    Remove pixels with difference greater than tol
-    Returns a bool mask.
+    Thresh is pixel level threshold before it can be called a CR (in elecrons), not used
     '''
 
-    nans = np.empty(image.shape)
-    nans[:] = replace # doesn't have to be NaNs, can replace with zeros for instance
-    cr_mask = diff > tol
-    view(cr_mask, cmap='binary_r', title='CR Hits')
-    print('Removed {} cosmic ray pixels.'.format(np.count_nonzero(cr_mask)))
-    return cr_mask
+    masks = []; medimages = []
+    for axis, shift in zip([0,1],[sy,sx]):
+        if shift != 0:
+            image_stacks = []
+            for sh in range(-shift,shift+1,1): # 0 spatial, 1 spectral
+                if sh == 0: continue # dont count self
+                new_image = np.roll(image, sh, axis=axis)
+                image_stacks.append(new_image)
 
-def clean_cosmic_rays(image, error, tol, replace='median', debug=False):
-    '''
-    Replace CR hits with NaN by taking the difference between
-    pixels and the median of their surrounding pixels
-    and flagging values above tol
-    '''
-    medimage, stdimage = create_median_image2(image)
-    residual = abs(image) - abs(medimage)
-    mask = abs(residual**2) > abs(stdimage**2*tol)
+            medimage = np.nanmedian(image_stacks, axis=0)
+            stdimage = np.nanstd(image_stacks, axis=0)
+            # std of the pixels
+            residuals = np.abs(image - medimage)
+            mask = np.abs(residuals) > tol*stdimage
+            masks.append(mask); medimages.append(medimage)
+    
+    mask = np.sum(masks, axis=0) == len(masks) # if both are flagged, flag
 
-    inds = []
-    for _ in range(100): # first 10 crs
-        val = 0
-        for i, row in enumerate(abs(residual**2) - abs(stdimage**2*tol)):
-            for j, col in enumerate(row):
-                if col > val and not (i,j) in inds:
-                    val = col
-                    ind = (i,j)
-        inds.append(ind)
-    view(image, show=False)
-    ax = p.gca()
-    ax.set_autoscale_on(False)
-    for ind in inds:
-        p.plot(ind[0],ind[1],marker='o',mec='w',mfc='None')
-    p.show()
-
-    #mask = abs(residual**2) > abs(image*tol)
-    if False: # Have a look at the process
-        view(residual**2/stdimage**2, vmax =tol, vmin=2)
-        #view(image, title='Original Image')
-        #view(error, title='Errors')
-        view(residual**2/stdimage**2, title='Residual/std')
-        view(stdimage, title='std at each pixel')
-        #view(np.isnan(residual), cmap='binary_r', title='NaN residuals')
-        #view(np.divide(residual, error), title='Criterion')
-        view(mask, cmap='binary_r', title='{} CR Hits'.format(np.count_nonzero(mask)))
-
+    if not mask_dq: mask[dq_mask] = False # dont want to count DQ pixels as CRs
     if replace == 'median':
-        replace = medimage.copy()
-        # need to not use mask on other side
+        replace = np.mean(medimages, axis=0)
     return np.where(mask,replace,image), mask
-
-def view_cosmic_rays(image, error, tol=20, debug=True):
-    '''Plot the cosmic rays that would be identified with the given tolerance'''
-    clean, mask = clean_cosmic_rays(image, error, tol=tol, debug=True)
-    if debug:
-        view(mask,cbar=False,cmap='binary_r')
-    return mask
-
-
-def spatial_median_filter(image, dq_mask, tol, sx=1, sy=1, thresh=500, replace='median', debug=False, read_noise=20, mask_dq=False):
-
-    image_stacks = []
-    for spatial in range(-sy,sy+1,1): # 0 spatial, 1 spectral
-        one_roll = np.roll(image, spatial, axis=0)
-        for spectral in range(-sx,sx+1,1):
-            if spatial == 0 and spectral == 0:
-                continue # dont use the pixel in question
-            new_image = np.roll(one_roll, spectral, axis=1)
-            #view(new_image - image, title='{}_{}'.format(axis, shift))
-            if spatial > 0:
-                new_image[:sy,:] = image[:sy,:]
-            elif spatial < 0:
-                new_image[-sy:,:] = image[-sy:,:]
-            if spectral > 0:
-                new_image[:,:sx] = image[:,:sx]
-            elif spectral < 0:
-                new_image[:,-sx:] = image[:,-sx:]
-            image_stacks.append(new_image)
-
-    medimage = np.nanmedian(image_stacks, axis=0)
-    stdimage = np.nanstd(image_stacks, axis=0)
-    # std of the pixels
-    varimage = np.abs(medimage) + read_noise**2 # variance of the median pixel
-    residuals = np.abs(image - medimage)
-
-    mask2 = np.abs(residuals) > tol*np.sqrt(varimage)
-    if not mask_dq: mask2[dq_mask] = False # dont want to count DQ pixels as CRs
-    #largest_good = np.max(residuals[np.logical_and(np.logical_not(mask2), np.logical_not(dq_mask))])
-    #largest_good = np.max(residuals[np.logical_and(np.logical_not(mask2),np.logical_not(dq_mask))])
-    #mask2 = np.logical_and(mask2, residuals > largest_good)
-    #mask2 = np.logical_and(mask2, residuals > 400)
-    if replace == 'median':
-        replace = medimage
-    return np.where(mask2,replace,image), mask2
-
-# Sliding median filter #
-
-# input time series of data
-# return CR filtered time series
-
-def align_images(subexposures, POSTARG2=11.934, scan_rate=0.12):
-    '''
-    Allign all the spectra by rolling the arrays
-    Need scan direction and rate if variable, the value
-    of 0.12"/s is what was applied to L.Kreidberg's observations
-    of GJ-1214b. For WASP-18, a scan rate of 0.30"/s seems plausible.
-    '''
-    if POSTARG2 >= 0:
-        # backward scan
-        scan_rate = -abs(scan_rate)
-    elif POSTARG2 < 0:
-        # forward scan
-        scan_rate = abs(scan_rate)
-
-    images, shifts = [], []
-    for sub in subexposures:
-        # to the nearest pixel
-        shift = int(scan_rate * sub.TIME.header['PIXVALUE'] / 0.121)
-        #       scan rate exp time                      pix size
-        image = sub.SCI.data.copy()
-        images.append(np.roll(image,shift,axis=0))
-        shifts.append(shift)
-    return images, shifts
-
-def restore_images(images, shifts):
-    '''Undo shifting applied to images'''
-    images = [np.roll(image,-shift,axis=0) for image, shift in zip(images,shifts)]
-    return images
-
-def slide_median_filter(exposure, tol, width, thresh=500, debug=False, show=False, POSTARG2=11.934, scan_rate=0.12, logger=False):
-    '''
-    Apply sliding median filter to subexposures.
-    Should have DQ flagged pixels already in the .mask attribute.
-    Only applied to the 40 pixel tall box around spectrum in subexposure.
-    '''
-    subexposures = exposure.subexposures
-    data, shifts = align_images(subexposures, POSTARG2, scan_rate)
-
-    # stack time series into a n+1D image
-    series = np.dstack(data[:])
-    CR_masks, images = [], []
-    for i in range(series.shape[-1]):
-        low, up = i-width, i+width
-        if low not in range(series.shape[-1]):
-            low, up = 0, up-low
-        elif up not in range(series.shape[-1]):
-            up, low = series.shape[-1]-1, low-series.shape[-1]+up
-
-        image = series[:,:,i]
-        sigma = np.nanstd(series[:,:,low:up], axis=-1)
-        median = np.nanmedian(series[:,:,low:up], axis=-1)
-        sigma[np.isnan(sigma)] = 0
-        lim = median + tol*sigma
-        CR_mask = image > lim # highly varying pixels
-        CR_mask = np.logical_and(image > thresh, CR_mask) # only include those with sufficient energy
-        # i.e. > 500 electrons
-
-        CR_mask[np.isnan(image)] = 0
-        # remove the NaNs that would be marked as greater than tolsigma
-
-        if logger:
-            logger.info('Subexposure {}, {} CR hit(s)'.format(i,np.count_nonzero(CR_mask)))
-            if np.count_nonzero(CR_mask) > 10:
-                logger.warning('Exposure {}, subexposure {}'.format(exposure.rootname,i))
-                logger.warning('Large number of CR hits found in subexposure: {}'.format(np.count_nonzero(CR_mask)))
-                if np.count_nonzero(CR_mask) > 50:
-                    # save an image of the CR mask
-                    p.figure()
-                    p.subplot(2,1,1)
-                    view(CR_mask, show=False, cmap='binary_r')
-                    p.subplot(2,1,2)
-                    view(image, show=False)
-                    png_file = '/'.join(exposure.filename.split('/')[:-1])+'/logs/'+exposure.rootname+'_{}.png'.format(i)
-                    p.savefig(png_file)
-                    logger.warning('Saving image to {}'.format(png_file))
-
-
-            if show:
-                clean = image.copy()
-                clean[np.isnan(image)] = 0
-                clean[CR_mask] = np.nan
-                p.title('Subexposure {}'.format(i))
-                view(clean)
-
-        image = np.where(CR_mask, median, image)
-        CR_masks.append(CR_mask)
-        images.append(image)
-
-    CR_masks = restore_images(CR_masks, shifts)
-    images = restore_images(images, shifts)
-
-    for image, CR_mask, subexposure in zip(images, CR_masks, subexposures):
-        subexposure.SCI.data = image
-        subexposure.SCI.header['CR'] = np.count_nonzero(CR_mask)
-        subexposure.SCI.header.comments['CR'] = 'Number of cosmic rays found by sliding median filter'
-        # don't actually want to mask out cosmic rays since replacing with median
-        #subexposure.mask = np.logical_or(subexposure.mask, CR_mask)
-
-    return subexposures
-
-'''
-# ipynb median filter code:
-# mess with scan rates and CR checks
-reload(data)
-images, shifts = [], []
-for sub in exposure.subexposures:
-    # first embed in a bigger frame
-    # sub.nan_to_num(0)
-    frame = np.zeros((512,256))
-    shift = int(0.12 *       sub.TIME.header['PIXVALUE'] / 0.121)
-    #       drift rate   exp time                      pix size
-    frame[256-shift:-shift-1,:] = sub.SCI.data.copy()
-    frame = frame[371:412,:]
-    images.append(data.Single_ima(pyfits.ImageHDU(frame)))
-    shifts.append(shift)
-reload(r)
-
-cleaned = r.slide_median_filter(images,tol=2.5,width=5,thresh=500, debug=True)
-'''
 
 
 ########################################
@@ -807,9 +575,6 @@ def find_box(source_image, h=40, sign='p', refine=False):
     else: assert False, 'Choose either positive (p), negative (n) or all (a) pixels'
 
     # Only looks for maximal positive area (do in two steps to cut down time)
-    #areas = [box_area(pix, image, h, sign=sign) for pix in range(int(h/2),len(image)-int(h/2),int(h/2))]
-    #rpix = areas.index(np.max(areas))
-    #areas = [box_area(pix, image, h, sign=sign) for pix in range(rpix-int(h/2),rpix+int(h/2))]
     areas = [box_area(pix, image, h, sign=sign) for pix in range(int(h/2),len(image)-int(h/2))]
     pix = range(int(h/2),len(image)-int(h/2))[areas.index(np.max(areas))]
     # first find the area maximizer, then maximize the points within that area
@@ -834,6 +599,11 @@ def find_box(source_image, h=40, sign='p', refine=False):
 ##############################################
 
 def spec_pix_shift(template_x, template_y, x, y, debug=False):
+    '''
+    Calculate optimal shift in wavelength by cross-correlation.
+    Input template_x and x assumed to be in microns
+    template_y and y should have been already normalised
+    '''
     def min_func(shift):
         shift_y = np.interp(template_x, template_x+shift, y)
         return template_y - shift_y
@@ -845,6 +615,7 @@ def spec_pix_shift(template_x, template_y, x, y, debug=False):
         p.title('Shift: {:.6g} microns or ~{:.2f} pixels'.format(shift, shift/0.0045))
         p.plot(template_x, np.interp(template_x, template_x+shift, y), label='Shifted')
         p.plot(x, y, label='Original')
+        p.plot(template_x, template_y, ls='--', label='Template')
         p.legend()
         p.show()
         diff = np.max(np.interp(template_x, template_x+shift, y)-y)
@@ -1083,6 +854,35 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.limb_dark = "linear"           #limb darkening model
         params.u = [0.55]                     #stellar limb darkening coefficients
         params.fp = 199.5e-6                      #secondary eclipse depth, wave/temp dependent
+        params.Hmag = 0.
+    elif system == 'XO2':
+    #https://arxiv.org/pdf/0705.0003.pdf
+        per = 2.615857
+        params.t0 = 2454147.74902
+        params.t_secondary = params.t0 + per/2.
+        params.per = per                      #orbital period
+        params.rp = 0.98*cs.R_jup.value / (0.97*cs.R_sun.value)           # Rp/Rs, mean 0.0142
+        params.a = 0.0369*1.496e11 / (0.97*6.957e8)   #semi-major axis (a/Rs)
+        params.inc = 88.9                      #orbital inclination (in degrees)
+        params.ecc = 0.                   #eccentricity
+        params.w = 180.                     #longitude of periastron (in degrees)
+        params.limb_dark = "linear"           #limb darkening model
+        params.u = [0]                     #stellar limb darkening coefficients
+        params.fp = 0                      #secondary eclipse depth, wave/temp dependent
+        params.Hmag = 0.
+    elif system == 'WASP-103':
+        per = 0.925542
+        params.t0 = 2456459.59957
+        params.t_secondary = params.t0 + per/2.
+        params.per = per                      #orbital period
+        params.rp = 1.528*cs.R_jup.value / (1.436*cs.R_sun.value)           # Rp/Rs, mean 0.0142
+        params.a = 0.01985*1.496e11 / (0.97*6.957e8)   #semi-major axis (a/Rs)
+        params.inc = 86.3                      #orbital inclination (in degrees)
+        params.ecc = 0.                   #eccentricity
+        params.w = 180.                     #longitude of periastron (in degrees)
+        params.limb_dark = "linear"           #limb darkening model
+        params.u = [0]                     #stellar limb darkening coefficients
+        params.fp = 0                      #secondary eclipse depth, wave/temp dependent
         params.Hmag = 0.
     else: print 'WARNING unsupported system.'
     for key in kwargs:

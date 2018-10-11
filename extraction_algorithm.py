@@ -204,7 +204,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
 
     if func_type == 'spline':
         if not tol is None: tol = np.mean(distn)*tol # set the tolerance to n% of the mean flux?
-        if tol <= 0 or tol is None: tol=len(distn); logger.warning('Tolerance set to default in spline fit for column {}'.format(i))
+        if tol <= 0 or tol is None: tol=len(distn); logger.info('Tolerance set to default in spline fit for column {}'.format(i))
 
         if debug and full_debug: print 'Tolerance set to:', tol
         if not order: order = 2
@@ -252,7 +252,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
 
     elif func_type == 'custom_spline':
         if not tol is None: tol = 40*len(distn)*tol # set the tolerance to n% of the mean flux?
-        if tol <= 0 or tol is None: tol=len(distn); logger.warning('Tolerance set to default in spline fit for column {}'.format(i))
+        if tol <= 0 or tol is None: tol=len(distn); logger.info('Tolerance set to default in spline fit for column {}'.format(i))
         if not order: order = 2
 
         n_knots = 2 # start
@@ -682,6 +682,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
         else: M = M_CR
     else: M = np.logical_and(M_DQ, M_CR)
 
+ 
     if M is not None:
         # interpolate over bad pixels in D marked by M==0 along dispersion direction
         mask = M.astype(bool) # False where bad
@@ -789,6 +790,10 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     # Now that we have the spatial profile, apply it to the original image
     # so as to not actually include bad pixels in the final results use M mask
     f, fV = optimized_spectrum(origima, S, P, V, M)
+
+    temp_M = np.ones_like(M)
+    temp_M[np.logical_not(np.isfinite(origima))] = 0
+    f2, fV2 = optimized_spectrum(origima, S, P, V, temp_M)
 
     if debug:
         p.subplot(2,1,1)

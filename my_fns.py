@@ -8,7 +8,7 @@ import numpy as np
 from scipy import optimize
 from scipy.interpolate import interp1d
 import types
-import matplotlib.pyplot as p
+import matplotlib.pylab as p
 import operator
 from scipy.optimize import leastsq
 

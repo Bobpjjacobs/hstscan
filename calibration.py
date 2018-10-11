@@ -16,7 +16,7 @@ def field_dep_coeff(m, coeffs, x, y):
     Input the order of the field function and the coefficients.
     x and y are the size of the field in the x and y directions
     '''
-    assert hasattr(coeffs, '__iter__'), 'Coeffs should be an iterable, even if a single value'
+    assert hasattr(coeffs, '__iter__'), 'Coeffs should be an iterable, even if it contains a single value'
     assert m**2/2. + m/2. == len(coeffs), 'Incorrect number of coefficients for order {}'.format(m)
     # permutations of x^i * y^n-i
     permute_arrays = []
@@ -50,6 +50,12 @@ def center_of_flux(filename, x, y, size):
     cof_x = np.sum([ row*i for i, row in enumerate(image.T)]) / tot_flux - size
     cof_y = np.sum([ col*i for i, col in enumerate(image)]) / tot_flux - size
     return x+cof_x, y+cof_y
+
+def calc_poly_order(coeffs):
+    ''' m^2/2 + m/2 = len(coeffs) '''
+    c = -len(coeffs)
+    m = -0.5+np.sqrt(0.25-2*c)
+    return int(m)
 
 def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', x_len=256, y_len=256, XOFF=0, YOFF=0, data_dir='/', debug=False, log=False, pix_size=0.121, original_image=None, image_name='', disp_coef='default', object_ind=0, x=None, y=None):
     '''
@@ -134,11 +140,6 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     if scan_direction>0: Y = np.vstack([ Y0[:int(YREF)], YM[int(YREF):int(YREF+BEAM_H)], Y1[int(YREF+BEAM_H):] ])
     elif scan_direction<0: Y = np.vstack([ Y1[:int(YREF+BEAM_H)], YM[int(YREF+BEAM_H):int(YREF)], Y0[int(YREF):] ])
 
-    def calc_poly_order(coeffs):
-        ''' m^2/2 + m/2 = len(coeffs) '''
-        c = -len(coeffs)
-        m = -0.5+np.sqrt(0.25-2*c)
-        return int(m)
 
     # Evaluate polynomial
     def function(x_trace, x, y, ALL_COEFFS, plot_coeffs=False, debug=False):
@@ -348,3 +349,9 @@ def flat_field_correct(waves, fluxes, flat_file = '/net/glados2.science.uva.nl/a
         ff_error = ff_coeff*np.power(x,i)
     FFHDU.close()
     return np.divide(fluxes, tot_ff), tot_ff, ff_error
+
+#########################
+#       Tsiaras         #
+#########################
+
+

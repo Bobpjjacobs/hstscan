@@ -5,9 +5,6 @@ from data import *
 from my_errors import *
 import timecorr
 
-reload(f)
-reload(timecorr)
-
 """
 Data are stored in /net/glados2.science.uva.nl/api/jarcang1 directory, not backed up.
 """
@@ -34,17 +31,19 @@ def read_conf_file(fname):
                     val = True
                 elif val.lower() == 'false':
                     val = False
-                elif key in ['n_masks','cr_tol','cr_sigma','cr_width','cr_thresh','dq_replace','s','v_0','q','s_clip','s_cosmic','fit_tol']:
+                elif key in ['n_masks','cr_tol','cr_sigma','cr_width','cr_thresh','s','v_0','q','s_clip','s_cosmic','fit_tol']:
                     val = float(val)
-                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind']:
+                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width']:
                     val = int(val)
                 elif key == 'dq_flags':
-                    # 4: Bad detector pixel, 32: Unstable photometric response, 512: Bad flat field
-                    val = val[1:-1].split(',')
+                    # 4: Bad detector pixel, 32: Unstable photometric response, 256: Saturated, 512: Bad flat field
+                    val = val.split(',')
                     val = [ int(v) for v in val ]
-                elif key == 'cr_replace':
-                    try: val = float(val)
-                    except ValueError: pass # string
+                elif key == 'cr_replace' or key=='dq_replace':
+                    if val.lower == 'nan': val = np.nan
+                    else:
+                        try: val = float(val)
+                        except ValueError: pass # string
                 else:
                 # unexpected config parameter
                     try: val = float(val)
@@ -155,13 +154,19 @@ class Single_ima():
         subprocess.call(bash_command,shell=True,executable='/bin/bash')
         os.remove(temp_file)
 
-    def remove_bad_pix(self, int_flags=[4,32,512], replace=np.NAN, mask=False):
+    def remove_bad_pix(self, int_flags=[4,32,512], replace=np.NAN, width=1):
         '''
         Removes pixels that have been flagged as bad according to calwf3.
-        Replaces pixels with nan so that an average can be taken to replace them.
-        Alternatively if mask is True just marks the pixels to be ignored.
+        Replaces pixels with "replace" (default NaN).
         Input flags should be pure powers of 2 integers, according to WFC3 Handbook guidelines:
         http://www.stsci.edu/hst/wfc3/documents/handbooks/currentIHB/appendixE2.html
+        or (since that link seems broken)
+        http://www.stsci.edu/hst/wfc3/documents/handbooks/currentDHB/Chapter3_calibration4.html#547338
+
+        4: bad detector pixel
+        32: IR unstable pixel
+        (256: Saturated pixel)
+        512: bad flat-field value
         '''
 
         if self.DQ.data is None:
@@ -193,85 +198,44 @@ class Single_ima():
         mask = np.sum([ self.DQ.data/flag % 2 == 1 for flag in int_flags ], axis=0).astype(bool)
 
         self.mask = mask
-        if replace == 'mean':
+        if replace == 'mean' or replace == 'median':
             self.SCI.data[mask] = np.nan
-            self.mean_nan_pix()
+            self.mean_nan_pix(replace=replace)
         elif replace is not None:
             self.SCI.data[mask] = replace
 
         return mask
 
-    def nan_to_num(self,number=0):
-        self.SCI.data[np.isnan(self.SCI.data)] = number
-
-    def mean_nan_pix(self,loop_count=1):
+    def mean_nan_pix(self, width=1, replace='mean'):
         '''
-        After remove_bad, left with pixel entries being nan.
-        This restores the pixel from the averages of the true pixels around it.
-        Could have to run multiple times to restore clumps of bad pixels (at least 2 iterations)
-        depending on numpy iterating.
+        New mean nan pix
+        Remove all NaNs or infs, replace with local median of pixels
+        within width (in pixels)
         '''
-        #replace all nan and stop if none found
-        if loop_count == 1:
-            pass
-            #print('Iterating over data to restore bad pixels:')
-        #print('Performing loop no. %i' % loop_count)
-        it = np.nditer(self.SCI.data, flags=['multi_index'])
-        found = False
-        neigh_list = [(1,0),(1,1),(0,1),(-1,1),(-1,0),(-1,-1),(0,-1),(1,-1)]
-        while not it.finished:
-            if np.isnan(it[0]):
-                #store list of neighbouring pixels
-                found, neigh = True, []
-                for step in neigh_list:
-                    #try to access element, if it doesn't exist pass
-                    neigh_index = f.to_tuple(np.add(it.multi_index,step))
-                    try:
-                        n_val = self.SCI.data[neigh_index]
-                        if not np.isnan(n_val):
-                            neigh.append(n_val)
-                    except IndexError:
-                        pass
-                if len(neigh) == 0:
-                    #no good pixel neighbours
-                    pass
-                else:
-                    #update value with mean of neighbours
-                    self.SCI.data[it.multi_index] = np.mean(neigh)
-            it.iternext()
+        image = self.SCI.data
+        nans = np.logical_not(np.isfinite(self.SCI.data))
+        images = []
+        for shiftx in np.arange(-width,width+1):
+            for shifty in np.arange(-width,width+1):
+                if shiftx == 0 and shifty == 0: continue
+                _image = np.roll(image, shifty, axis=0)
+                _image = np.roll(_image, shiftx, axis=1)
+                images.append(_image)
+        if replace == 'mean': local_mean = np.nanmean(images, axis=0)
+        elif replace == 'median': local_mean = np.nanmedian(images, axis=0)
+        clean_image = np.where(nans, local_mean, image)
+        self.SCI.data = clean_image
 
-        if not found:
-            #print('All pixels restored.')
-            return None
-            loop_count += 1
-            self.mean_nan_pix(loop_count)
-
-    def average_bad_pix(self,DQ_flags=[4,32,512]):
-        '''
-        Replaces bad pixels with average of neighbouring pixels.
-        '''
-        self.remove_bad_pix(DQ_flags)
-        self.mean_nan_pix()
-
-    def trim_pix(self,replace=0, n=5):
+    def trim_pix(self, n=5):
         '''
         Remove n pixels from each edge.
         There is a 5 reference pixel border around each image.
         '''
-        if replace is None: replace = 0
-        mask = np.ones_like(self.SCI.data)
-        mask[n:-n,n:-n] = 0
-        mask = mask.astype(bool)
-        # mask the reference
-        self.SCI.data[mask] = replace
-        self.ERR.data[mask] = replace
-        # or trim it?
         self.SCI.data = self.SCI.data[n:,n:]
         self.SCI.data = self.SCI.data[:-n,:-n]
         self.ERR.data = self.ERR.data[n:,n:]
         self.ERR.data = self.ERR.data[:-n,:-n]
         if type(self.DQ.data) != 'NoneType':
-            self.DQ.data[mask] = replace
             self.DQ.data = self.DQ.data[n:,n:]
             self.DQ.data = self.DQ.data[:-n,:-n]
         else:
@@ -312,29 +276,6 @@ class Single_ima():
         if plot:
             self.sum_spectrum.plot(**kwargs)
         return self.sum_spectrum
-
-    def mask_spectrum(self):
-        '''
-        Remove the spectrum from the data, leaves only background counts.
-        mask = 125:260, 46:210 for untrimmed data
-        This is too crude and misses some of the spectrum in certain instances.
-        '''
-        if self.SCI.data.shape == (256,256):
-            #untrimmed
-            self.SCI.data[125:260, 46:210] = np.nan
-        elif self.SCI.data.shape == (246,246):
-            #trimmed
-            self.SCI.data[120:255, 45:205] = np.nan
-
-    def extract_spectrum(self):
-        '''
-        Draws a basic rectangle around the spectrum.
-        To be replaced by optimal extraction.
-        '''
-        store = np.empty(self.SCI.data.shape)
-        store[:] = np.NAN
-        store[138:242, 68:188] = self.SCI.data[138:242, 68:188] # really basic extraction box
-        self.SCI.data = store
 
 class Data_ima(BasicFits):
     '''``
@@ -445,7 +386,7 @@ class Data_red(Data_ima):
 class Data_flt(BasicFits):
     '''Break up an flt file into separate extensions and add methods'''
 
-    def __init__(self,filename):
+    def __init__(self,filename, bjd=True):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -463,16 +404,22 @@ class Data_flt(BasicFits):
                 jd_utc = mjd_ut
             RA, DEC = fits_file[0].header['RA_TARG'], fits_file[0].header['DEC_TARG']
 
-            # Now do the timing corrections
-            # jd -> bjd
-            bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '/home/jacob/Project_1/js41_hst.vec')
-            # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
-            # utc -> tdb
-            tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
-            dt = bjd_dt + tdb_dt
-            self.t = jd_utc + dt/60./60./24. # in days
-            self.dt = dt # timing offset in seconds
-            self.t_units = 'BJD_TT'
+            if bjd:
+                # Now do the timing corrections
+                # jd -> bjd
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '/home/jacob/Project_1/js41_hst.vec')
+                # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
+                # utc -> tdb
+                tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
+                dt = bjd_dt + tdb_dt
+                self.t = jd_utc + dt/60./60./24. # in days
+                self.dt = dt # timing offset in seconds
+                self.t_units = 'BJD_TT'
+
+            else:
+                self.t = jd_utc
+                self.dt = 0
+                self.t_units = 'JD_UTC'
 
             #add methods to the image extension
             fits_file[1] = obj_ds9(fits_file[1])
@@ -519,6 +466,8 @@ class Data_drz(BasicFits):
             self.WHT = fits_file[2]
             self.CTX = fits_file[3]
             self.HDRTAB = fits_file[4]
+            self.SCI.data # otherwise the file is closed? since the data are never accessed
+            
 
 
 ########################################
@@ -535,13 +484,13 @@ def which_class(filename):
     else:
         raise 'Unsupported file type '+ split_name[-1][:-5]
 
-def load(filename):
+def load(filename, **kwargs):
     '''Load in data as appropriate class instance.'''
     if not filename.split('_')[-1].endswith('.fits'):
-        return Data_ima(filename+'_ima.fits')
+        return Data_ima(filename+'_ima.fits', **kwargs)
     #print 'Loading', filename
     Class = which_class(filename)
-    return Class(filename)
+    return Class(filename, **kwargs)
 
 def load_all_ima(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False, direction='a'):
     '''
@@ -712,9 +661,9 @@ def read_spec(fname, wmin=-np.inf, wmax=np.inf):
         return zip(*lines)
 
 def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, plot=False, direction='a', all_plot=False, save_extension='_spec.txt', **kwargs):
-    with open(source_dir+system+'/'+files) as g:
+    with open(source_dir+files) as g:
         lines = g.readlines()
-    lines = [line.split('\t') for line in lines if not line.startswith('#')]
+    lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
     lines = [line for line in lines if line[1].startswith('G')]
     if direction[0] in ['f', 'r']:
         lines = [line for line in lines if line[3].startswith(direction)]
@@ -725,10 +674,10 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     all_flux, all_waves, all_times, all_errors = [], [], [], []
     for rootname, time in zip(rootnames, times):
         # look for the spec file
-        for file in os.listdir(source_dir+system):
-            if file.endswith(save_extension) and file.startswith(rootname):
+        for file in os.listdir(source_dir):
+            if file.endswith(save_extension) and file.startswith(rootname) and not file.endswith('_subs'+save_extension):
                 # got em!
-                waves, fluxes, errors = read_spec(source_dir+system+'/'+file, wmin=-np.inf, wmax=np.inf)
+                waves, fluxes, errors = read_spec(source_dir+file, wmin=-np.inf, wmax=np.inf)
                 # dont use wave limits here as spectrum may have drifted
                 all_flux.append(fluxes)
                 all_waves.append(waves)
@@ -773,6 +722,97 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 color = 'b'
             p.plot(t, fl, ls='None', marker='o', color=color, **kwargs)
         #p.show()
+    return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions)
+
+def get_sub_times(files, source_dir):
+
+    fstub = files.split('.')[0] 
+    # Creat sub_times file
+    if not os.path.isfile(source_dir+fstub+'_sub_times.dat'):
+        with open(source_dir+files) as g:
+            lines = g.readlines()
+        lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
+        lines = [line for line in lines if line[1].startswith('G')]
+        rootnames = [line[0] for line in lines]
+
+        times = []
+        for rootname in rootnames:
+            ima = rootname+'_ima.fits'
+            try:
+                ima = load(source_dir+ima)
+            except IOError:
+                _source_dir = '/'.join(source_dir.split('/')[:-2])+'/'
+                ima = load(_source_dir+ima)
+            times.append([str(read.SCI.header['ROUTTIME']) for read in ima.reads[:-2]])
+
+        try:
+            with open(source_dir+fstub+'_sub_times.dat', 'w') as g:
+                for rootname, time in zip(rootnames, times):
+                    g.write(rootname+'\t'+'\t'.join(time)+'\n') 
+        except:
+            f.silentremove(source_dir+fstub+'_sub_times.dat')
+            raise
+
+    # Read in sub times
+    with open(source_dir+fstub+'_sub_times.dat', 'r') as g:
+        lines = g.readlines()
+        lines = [ line.split() for line in lines ]
+    sub_times = {}
+    for line in lines:
+        sub_times[line[0]] = line[1:]
+    return sub_times
+
+def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, direction='a', save_extension='_spec.txt', **kwargs):
+    with open(source_dir+files) as g:
+        lines = g.readlines()
+    lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
+    lines = [line for line in lines if line[1].startswith('G')]
+    if direction[0] in ['f', 'r']:
+        lines = [line for line in lines if line[3].startswith(direction)]
+    rootnames = [line[0] for line in lines]
+    times = [float(line[2]) for line in lines]
+    directions = [line[3][0] for line in lines]
+
+    # load in sub times:
+    sub_times = get_sub_times(files, source_dir)
+
+    all_flux, all_waves, all_times, all_errors = [], [], [], []
+    for rootname, time in zip(rootnames, times):
+        # look for the spec file
+        for file in os.listdir(source_dir):
+            if file.endswith(save_extension) and file.startswith(rootname+'_subs'):
+                # got em!
+                data = np.loadtxt(source_dir+file, skiprows=1)
+                waves = data[:,0]
+                errors = data[:,2::2]
+                fluxes = data[:,1::2]
+                times = [float(t) for t in sub_times[rootname]]
+
+                all_flux.append(fluxes)
+                all_waves.append(waves)
+                all_times.append(times)
+                all_errors.append(errors)
+                break
+
+    template_x, template_y = all_waves[-1], np.median(np.array(all_flux)[-1], axis=-1) # median subs of last exposure
+    #template_x, template_y = all_waves[-1], np.median(all_flux[-8:], axis=0)
+    # median doesnt work for direction='a'
+    all_interp_spectra, all_interp_errors, all_shifts = [], [], []
+    for waves, _fluxes, _errors in zip(all_waves, all_flux, all_errors):
+        interp_spectra, interp_errors, shifts = [], [], []
+        for fluxes, errors in zip(np.array(_fluxes).T,np.array(_errors).T):        
+            shift = f.spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
+            shift_y = np.interp(template_x, template_x+shift, fluxes)
+            shift_err = np.interp(template_x, template_x+shift, errors)
+            interp_spectra.append(shift_y)
+            interp_errors.append(shift_err)
+            shifts.append(shift)
+        all_interp_spectra.append(interp_spectra); all_interp_errors.append(interp_errors); all_shifts.append(shifts)
+
+    broad_flux = [ [ np.sum([ _f for w, _f in zip(wvs, fl) if w > wmin and w < wmax ]) for fl in fls ] for wvs, fls in zip(all_waves, all_interp_spectra)]
+    broad_time = all_times
+    broad_errors = [ [ np.sqrt(np.sum(np.square([ e for w, e in zip(wvs, er) if w > wmin and w < wmax ]))) for er in errs ] for wvs, errs in zip(all_waves, all_interp_errors)]
+
     return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions)
 
 def create_lists(system='WASP-18', source_dir='/home/jacob/hst_data/'):
@@ -1103,13 +1143,15 @@ def make_driz_list(data_dir='/home/jacob/hst_data/'):
     Identify visists as those with more than one exposure used in drizzle.
     '''
     f.silentremove(data_dir+'/visit_driz.lis')
+    cnt = 0
     with open(data_dir+'/visit_driz.lis','w') as g:
         for file in os.listdir(data_dir):
             if file.endswith('_drz.fits'):
                 with pyfits.open(data_dir+'/'+file, memmap=False) as HDU:
                     if HDU[0].header['FILTER'].startswith('F'):
                         g.write(file+'\n')
-
+                        cnt += 1
+    assert cnt > 0, 'No driz combined images found for data in {}'.format(data_dir)
 
 def make_input_image_list(data_dir='/home/jacob/hst_data/'):
     os.nice(20)
@@ -1128,7 +1170,7 @@ def make_input_image_list(data_dir='/home/jacob/hst_data/'):
         for line in all_lines:
             g.write(line)
 
-def make_input_image_lists(output, input_file=None, system='GJ-1214', data_dir='/home/jacob/hst_data/', prop_str='iccz'):
+def make_input_image_lists(output, input_file=None, data_dir='/home/jacob/hst_data/WASP-18/', prop_str='iccz'):
     '''
     List all exposures, sorted into orbits with corresponding direct images.
     '''
@@ -1171,8 +1213,8 @@ def make_input_image_lists(output, input_file=None, system='GJ-1214', data_dir='
                 print 'Completed file', j, 'for visit', no
         line_dat.sort()
         lines = '\n'.join(['\t'.join(dat) for dat in line_dat])
-        f.silentremove(data_dir+system+'/visit_'+no+'.lis')
-        with open(data_dir+system+'/visit_'+no+'.lis', 'w') as g:
+        f.silentremove(data_dir+'/visit_'+no+'.lis')
+        with open(data_dir+'/visit_'+no+'.lis', 'w') as g:
             g.write(lines)
         print '#####################\nVisit', no, 'completed.\n#####################'
 
@@ -1185,7 +1227,7 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
     cat_rootname = None
     with open(data_dir+'input_image.lis','r') as g:
         lines = g.readlines()
-    lines = [line for line in lines if not line.startswith('#')]
+    lines = [line for line in lines if not line.startswith('#') and not line.strip()=='']
 
     for line in lines:
         l_rootname, l_filter, l_expstart, l_scan = line.split('\t')
