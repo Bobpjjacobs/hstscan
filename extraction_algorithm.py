@@ -635,7 +635,7 @@ def medfilt (x, k):
         y[:j,i] = x[0]
         y[:-j,-(i+1)] = x[j:]
         y[-j:,-(i+1)] = x[-1]
-    return np.median (y, axis=1)
+    return np.nanmedian (y, axis=1)
 
 # RUN ALGORITHM #
 
@@ -683,7 +683,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     else: M = np.logical_and(M_DQ, M_CR)
 
  
-    if M is not None:
+    if not M is None:
         # interpolate over bad pixels in D marked by M==0 along dispersion direction
         mask = M.astype(bool) # False where bad
         interp_spec = []
@@ -794,6 +794,12 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     temp_M = np.ones_like(M)
     temp_M[np.logical_not(np.isfinite(origima))] = 0
     f2, fV2 = optimized_spectrum(origima, S, P, V, temp_M)
+
+    #p.title('OE Spectrum')
+    #p.plot(f)
+    #p.plot(f2)
+    #p.show()
+    #view(M, cmap='binary', cbar=False)
 
     if debug:
         p.subplot(2,1,1)

@@ -10,7 +10,15 @@ import os
 reload(f)
 
 
-def field_dep_coeff(m, coeffs, x, y):
+def twoD_products_simple(x, y, m):
+    permute_arrays = [1]
+    
+    for n in range(m)[1:]: # order-1
+        for i in range(n+1):
+            permute_arrays.append(x**(n-i)*y**i)
+    return permute_arrays
+
+def field_dep_coeff(m, coeffs, x, y, permute_arrays=None):
     '''
     Evaluates a function at all field positions subject to the coefficients provided.
     Input the order of the field function and the coefficients.
@@ -19,24 +27,12 @@ def field_dep_coeff(m, coeffs, x, y):
     assert hasattr(coeffs, '__iter__'), 'Coeffs should be an iterable, even if it contains a single value'
     assert m**2/2. + m/2. == len(coeffs), 'Incorrect number of coefficients for order {}'.format(m)
     # permutations of x^i * y^n-i
-    permute_arrays = []
-    for n in range(m): # 0th order, 1st order etc
-        for i, term in enumerate(P_iter([x,y], n)):
-            if len(term) == 0:
-                # first coefficient
-                permute_arrays.append(np.ones_like(x))
-            elif len(term) == 1:
-                permute_arrays.append(term[0])
-            else:
-                mult = np.ones_like(term[0])
-                for arr in term:
-                    mult = np.multiply(mult, arr)
-                permute_arrays.append(mult)
+    if permute_arrays is None: permute_arrays = twoD_products_simple(x,y,m)
 
     # find final sum
-    field_coeffs = np.zeros_like(x)
+    field_coeffs = 0
     for arr, coeff in zip(permute_arrays, coeffs):
-        field_coeffs = field_coeffs + arr*coeff
+        field_coeffs += arr*coeff
     return field_coeffs
 
 def center_of_flux(filename, x, y, size):
@@ -320,7 +316,7 @@ def interp_full_image2(scale, waves, image, mask):
 # Flat field correction #
 #########################
 
-def flat_field_correct(waves, fluxes, flat_file = '/net/glados2.science.uva.nl/api/jarcang1/aXe/CONF/WFC3.IR.G141.flat.2.fits'):
+def flat_field_correct(waves, fluxes, x0=0, x1=-1, ystart=0, yend=-1, flat_file = '/net/glados2.science.uva.nl/api/jarcang1/aXe/CONF/WFC3.IR.G141.flat.2.fits', wave_dep=True):
     '''
     Find the pixel values after a wavelength dependant flat-field correction.
     Flat-field is defined by a polynomial whos coefficients are in the conf file:
@@ -332,21 +328,19 @@ def flat_field_correct(waves, fluxes, flat_file = '/net/glados2.science.uva.nl/a
     w_max, w_min = FFHDU[0].header['WMAX']/ 10000., FFHDU[0].header['WMIN']/ 10000.
     ff_coeffs = []
     # need to extract the relevant subarray of the flat field image
-    x_len, y_len = waves.shape
-    ff_x, ff_y = FFHDU[0].data.shape
-    x_in, y_in = (ff_x - x_len)/2, (ff_y - y_len)/2
     for HDU in FFHDU:
-        ff_coeffs.append(HDU.data[x_in:-x_in,y_in:-y_in])
-    assert ff_coeffs[0].shape == waves.shape, 'Somethings gone wrong'
+        ff_coeffs.append(HDU.data[ystart:yend,x0:x1])
+    assert ff_coeffs[0].shape == fluxes.shape, 'FF shape {}, image shape {}'.format(ff_coeffs[0].shape, fluxes.shape)
     # calculate normalized wavelengths
-    x = (waves - w_min)/(w_max - w_min)
+    if wave_dep: x = (waves - w_min)/(w_max - w_min)
+    else: x = 1
 
     # evaluate the flat field by a polynomial and divide fluxes
     tot_ff = 0
     for i, ff_coeff in enumerate(ff_coeffs):
         tot_ff = tot_ff + np.multiply(np.power(x, i), ff_coeff)
-        #view(ff_coeff*np.power(x,i), title='Term {} in ff poly'.format(i), units='Correction')
         ff_error = ff_coeff*np.power(x,i)
+        if not wave_dep: break # only do the wavelength indep part
     FFHDU.close()
     return np.divide(fluxes, tot_ff), tot_ff, ff_error
 

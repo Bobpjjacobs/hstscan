@@ -37,8 +37,10 @@ def read_conf_file(fname):
                     val = int(val)
                 elif key == 'dq_flags':
                     # 4: Bad detector pixel, 32: Unstable photometric response, 256: Saturated, 512: Bad flat field
-                    val = val.split(',')
-                    val = [ int(v) for v in val ]
+                    if val == 'None': val = None
+                    else:
+                        val = val.split(',')
+                        val = [ int(v) for v in val ]
                 elif key == 'cr_replace' or key=='dq_replace':
                     if val.lower == 'nan': val = np.nan
                     else:
@@ -168,6 +170,7 @@ class Single_ima():
         (256: Saturated pixel)
         512: bad flat-field value
         '''
+        if int_flags is None: return np.zeros_like(self.SCI.data).astype(bool)
 
         if self.DQ.data is None:
             try:
@@ -673,17 +676,27 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
 
     all_flux, all_waves, all_times, all_errors = [], [], [], []
     for rootname, time in zip(rootnames, times):
+        got = False
+        #print rootname,
         # look for the spec file
-        for file in os.listdir(source_dir):
-            if file.endswith(save_extension) and file.startswith(rootname) and not file.endswith('_subs'+save_extension):
+        for file_ in os.listdir(source_dir):
+            if file_.endswith(save_extension) and file_.startswith(rootname) and not file_.endswith('_subs'+save_extension):
                 # got em!
-                waves, fluxes, errors = read_spec(source_dir+file, wmin=-np.inf, wmax=np.inf)
+                waves, fluxes, errors = read_spec(source_dir+file_, wmin=-np.inf, wmax=np.inf)
                 # dont use wave limits here as spectrum may have drifted
                 all_flux.append(fluxes)
                 all_waves.append(waves)
                 all_times.append(time)
                 all_errors.append(errors)
+                got = True
+                #print got
                 break
+            else: 
+                pass
+        #if not got: print got
+
+    #print len(times), len(directions), len(rootnames)
+    #print '^', len(all_flux)
 
     # Interpolate to first spectrum in the visit/orbit
     template_x, template_y = all_waves[-1], all_flux[-1]
@@ -1156,7 +1169,7 @@ def make_driz_list(data_dir='/home/jacob/hst_data/'):
 def make_input_image_list(data_dir='/home/jacob/hst_data/'):
     os.nice(20)
     all_lines = []
-    for file in os.listdir(data_dir):
+    for file in sorted(os.listdir(data_dir)):
         if file.startswith('visit') and file.endswith('.lis'):
             with open(data_dir+file, 'r') as g:
                 lines = g.readlines()
@@ -1170,7 +1183,7 @@ def make_input_image_list(data_dir='/home/jacob/hst_data/'):
         for line in all_lines:
             g.write(line)
 
-def make_input_image_lists(output, input_file=None, data_dir='/home/jacob/hst_data/WASP-18/', prop_str='iccz'):
+def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-18/', prop_str='iccz'):
     '''
     List all exposures, sorted into orbits with corresponding direct images.
     '''
@@ -1189,7 +1202,7 @@ def make_input_image_lists(output, input_file=None, data_dir='/home/jacob/hst_da
             for file in lines:
                 nos.append(file[4:6])
 
-    nos = list(set(nos))
+    nos = sorted(list(set(nos)))
     print nos
     for no in nos:
         print 'Starting visit', no

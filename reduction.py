@@ -499,7 +499,7 @@ def has_blobs(mask, tol=4):
 ########################################
 
 
-def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, thresh=500, replace='median', debug=False, mask_dq=False):
+def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, maxmax=8e4):
     '''
     Filter cosmic rays by using a local median of pixels
     First compute median in x and y, using sx and sy number of pixels either side
@@ -528,11 +528,16 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, thresh=500, replace
             masks.append(mask); medimages.append(medimage)
     
     mask = np.sum(masks, axis=0) == len(masks) # if both are flagged, flag
+    mask = np.logical_or(mask,image>maxmax)
 
     if not mask_dq: mask[dq_mask] = False # dont want to count DQ pixels as CRs
     if replace == 'median':
         replace = np.mean(medimages, axis=0)
-    return np.where(mask,replace,image), mask
+    if not replace is None:
+        new_image = np.where(mask,replace,image)
+    else:
+        new_image = image
+    return new_image, mask
 
 
 ########################################
@@ -543,13 +548,19 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, thresh=500, replace
 # fit a 40 pixel tall box in space over the spectrum
 # maximize area within box to find spectrum and fit box
 
-def box_cut(pix, image, h=40, horizontal=False):
+def box_cut(pix, image, h=40, horizontal=False, force_shape=True):
     if horizontal: image = image.T
     pix = int(pix)
     if pix < h/2:
-        box = image[0:h]
+        if force_shape == True:
+            box = image[:h]
+        else:
+            box = image[:pix+h/2]
     elif len(image) - pix < h/2:
-        box = image[-h:]
+        if force_shape == True:
+            box = image[-h:]
+        else:
+            box = image[pix-h/2:]
     else:
         box = image[pix-h/2:pix+h/2]
     if horizontal: box = box.T
