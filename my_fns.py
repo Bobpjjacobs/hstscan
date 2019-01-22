@@ -142,6 +142,7 @@ def poly_n(x,coef):
 
     '''
     return np.polyval(coef,x)
+
 def gauss(x, coef):
     '''
     Coefficients are, in order, a,b,c,(d) defined by:
@@ -155,6 +156,7 @@ def gauss(x, coef):
     except IndexError:
         d = 0
     return a*np.exp(-np.square(x-b) / (2.*c*c)) + d
+
 def spline(x, coef):
     '''
     Hack to implement spline results from UnivariateSpline
@@ -162,6 +164,7 @@ def spline(x, coef):
     Here coef is the spline object
     '''
     return coef(x)
+
 def custom_spline(x, coefs):
     '''
     coefs should be in the format [nodes, poly coefs]
@@ -181,6 +184,7 @@ def custom_spline(x, coefs):
                     ind = i
         return np.sum([ coefs[ind][n]*(xi**n) for n in range(len(coefs[ind])) ])
     return np.array(map(spline_fn, x))
+
 def split_spline(x, coef):
     '''
     Use spline with linear fit on either side (for wings).
@@ -201,6 +205,7 @@ def split_spline(x, coef):
     if len(out) == 1:
         out = out[0]
     return out
+
 def smooth_Heaviside(x, k, h):
     '''
     Coeff is k, controls the smoothing.
@@ -209,6 +214,7 @@ def smooth_Heaviside(x, k, h):
         y = h / ( 1 + exp(-2kx ) )
     '''
     return h*np.reciprocal(1 + np.exp(-2*k*x))
+
 def custom_hill(x, coef):
     '''
     Returns a custom 'hill' function made of
@@ -241,50 +247,10 @@ def custom_hill(x, coef):
     down = -smooth_Heaviside(x-s-w,k,h)
     return up + down + y
 
-def ds9(array):
-    '''
-    View an array in ds9 by saving it to a temp
-    fits file with the .data extension of the primary
-    being the array.
-    '''
-    t_id = str(int(np.random.uniform(0,1000)))
-
-    temp_hdu = pyfits.PrimaryHDU(array)
-    temp_hdulist = pyfits.HDUList([temp_hdu])
-    temp_file = '/home/jarcang1/Downloads/temp_'+t_id+'.fits'
-    temp_hdulist.writeto(temp_file)
-
-    bash_command = '/scratch/jarcang1/src/ds9 {}'.format(temp_file)
-    subprocess.call(bash_command,shell=True,executable='/bin/bash')
-
-    #cleanup
-    os.remove(temp_file)
-
-def spec_pix_shift(template_x, template_y, x, y, debug=False):
-    def min_func(shift):
-        shift_y = np.interp(template_x, template_x+shift, y)
-        return template_y - shift_y
-    results = leastsq(min_func, x0=0.01, full_output=True)
-    success = results[-1] in [1,2,3,4]
-    shift = results[0][0]
-    assert success, 'Fitting failed'
-    if debug:
-        p.title('Shift: {:.6g} microns or ~{:.2f} pixels'.format(shift, shift/0.0045))
-        p.plot(template_x, np.interp(template_x, template_x+shift, y), label='Shifted')
-        p.plot(x, y, label='Original')
-        p.legend()
-        p.show()
-        diff = np.max(np.interp(template_x, template_x+shift, y)-y)
-        p.title('Difference {:.2g} electrons ({:.2f}%)'.format(diff, diff/max(y)*10**2))
-        p.plot(template_x, np.interp(template_x, template_x+shift, y)-template_y, label='Difference from template')
-        p.show()
-    return shift
-
 class Spectrum():
     '''
     Basic spectrum object.
-    Calling the spectrum at a given x gives you a y by interpolation,
-    currently just with a straight line.
+    Calling the spectrum at a given x gives you a y by linear interpolation.
     '''
     def __init__(self, x, y, x_unit=None, y_unit=None, name=None):
         #should include a zip sort

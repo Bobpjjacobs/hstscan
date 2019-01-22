@@ -5,3 +5,9 @@
 
 test/*
 
+*.pdf
+*.png
+*.fits
+*.log
+*spec.txt
+

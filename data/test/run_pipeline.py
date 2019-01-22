@@ -10,13 +10,13 @@ from progress.bar import Bar
 if len(sys.argv) > 1:
     source_files = []
     for arg in sys.argv[1:]: source_files.append(arg)
-else: source_files = ['eclipse_3.lis']; print 'Reducing default source files {}'.format(source_files)
+else: source_files = ['eclipse.lis']; print 'Reducing default source files {}'.format(source_files)
 
 data_dir='/home/jacob/hstscan/data/test/'
 direction='a'
-red_file='/home/jacob/hstscan/data/test/red.conf'
-ext_file='/home/jacob/hstscan/data/test/ext.conf'
-log_file='/home/jacob/hstscan/data/test/logs/all_terminal.log'
+red_file=data_dir+'red.conf'
+ext_file=data_dir+'ext.conf'
+log_file=data_dir+'logs/all_terminal.log'
 cores=2
 
 if __name__ == '__main__':

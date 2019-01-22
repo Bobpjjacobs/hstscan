@@ -393,6 +393,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
 
     # initial guesses
     coef0 = coef_dict[func_type]
+    if func_type == 'gauss':
+        coef0 = [np.mean(D), D.shape[0]/2, 2, 0]
 
     for i in range(D.shape[1]):
         # iterate along columns (wavelengths) of the IMAGE
@@ -665,7 +667,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     globals()['logger'] = logger
 
     if pdf_file:
-        assert bool(pdf_file), 'If debugging need to specify an output file'
+        assert pdf_file, 'If debugging need to specify an output file'
         #print('Fitting {} to spatial distribution with optimization method {}.'.format(func_type, method))
         #print('Cosmic ray removal is set to: {}'.format(bool(s_cosmic)))
         pdf = PdfPages(pdf_file)
@@ -674,7 +676,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
 
     # Interpolate over bad pixels
     origima = D.copy()
-    origima[np.isnan(origima)] = 0 # store original image
+    origima[np.logical_not(np.isfinite(origima))] = 0 # store original image
 
     if M_DQ is None:
         M_DQ = np.ones_like(D)
@@ -683,7 +685,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     else: M = np.logical_and(M_DQ, M_CR)
 
  
-    if not M is None:
+    if M is not None:
         # interpolate over bad pixels in D marked by M==0 along dispersion direction
         mask = M.astype(bool) # False where bad
         interp_spec = []

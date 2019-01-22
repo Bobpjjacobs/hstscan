@@ -1,6 +1,7 @@
 from my_fns import np, p, os
 from matplotlib.pyplot import rcParams
 from scipy.optimize import leastsq, curve_fit
+from scipy.interpolate import interp1d
 import calibration as cal
 
 def get_conf_coeffs(conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
@@ -93,7 +94,13 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
         c = (atn[0]+atn[1]*xs+atn[3]*xs**2)*(x-xs) + btn[0]+btn[1]*xs - y
         det = b*b - 4*a*c
         # return both solutions and pick physical one yourself
-        return (-b+det**0.5)/(2*a), (-b-det**0.5)/(2*a)
+        assert det >= 0, 'Negative det, imaginary solutions only'
+        if a == 0.:
+            assert b != 0, 'Non-sensical equation for y*, a=b=0'
+            return -c/b, -c/b
+        else:
+            return (-b+det**0.5)/(2*a), (-b-det**0.5)/(2*a)
+
 
     def inv_wdpt(x,y):
         '''More usefully calculate the wavelength given a position on the detector'''
@@ -116,6 +123,7 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
         for j in range(200):
             xi, yi = x[j], y[i]
             lam = inv_wdpt(xi,yi)
+            assert not np.isnan(lam), 'x{}-y{}\nNaN wavelength'.format(xi, yi)
             wave_grid[i,j] = lam
     return wave_grid
 
@@ -145,9 +153,133 @@ def sum_to_spectrum_linear(image, wave_grid, x0, ystart, yend, wave_bins=np.lins
 
     return (wave_bins[:-1]+wave_bins[1:])/2., flux
 
-def interp_wave_grid(wave_ref, wave_grid, image, mask, tol=0.01):
+def quad_coeffs(f0,f1,f2):
     '''
-    Interpolate image to new wavelength grid (linear interpolation)   
+    Calculate "sane" poly coefficients from pixel fluxes.
+    Defined so that area of poly in pixel = pixel flux
+    '''
+    a = (f0-2*f1+f2)/2.
+    b = (f2-f0)/2.
+    c = f1 - a/12.
+    return a, b, c
+
+def int_quad(x1, x2, a, b, c):
+    '''Integrate quadratic polynomical between x1 and x2.'''
+    return a/3.*(x2**3-x1**3) + b/2.*(x2**2-x1**2) + c*(x2-x1)
+
+
+def interp_sanity_quad(wv1, wv2, row2, plot=False):
+    '''
+    Interpolate spectrum (wv2,row2) to new wavelengths (wv1) using "sane" quadratic
+    '''
+    
+    # Calculate integration limits
+    wv_means1 = (wv1[:-1]+wv1[1:])/2.
+    wv_lims1 = zip(wv_means1[:-1], wv_means1[1:]) # bin edges
+    wv_lims1 = np.vstack([(wv1[0],wv_means1[0]), wv_lims1, (wv_means1[-1], wv1[-1])]) # end cases
+
+    wv_means2 = (wv2[:-1]+wv2[1:])/2.
+    wv_lims2 = zip(wv_means2[:-1], wv_means2[1:])
+    wv_lims2 = np.vstack([(wv2[0],wv_means2[0]), wv_lims2, (wv_means2[-1], wv2[-1])])
+
+
+    new_row2 = []
+    for lim1 in wv_lims1: # for each reference (new) wavebin
+        reflam0, reflam1 = lim1
+        # get index of respective bins on the edges
+        i0, i1 = np.argmin(abs(wv2-reflam0)), np.argmin(abs(wv2-reflam1))
+
+        if plot:
+            # Make a plot for a given wave bin showing contributions
+            _x = np.arange(i0-2,i1+3,1)
+            _y = [] 
+            for _xi in _x:
+                if _xi < 0 or _xi >= len(row2): _y.append(0)
+                else: _y.append(row2[_xi])
+
+            #p.bar(_x, _y, width=1, color='k', alpha=0.5, label='Data')
+            p.plot(_x, _y, color='None', ls='None', marker='None')
+            p.gca().set_autoscale_on(False)
+            p.bar(_x, _y, width=1, color='k', alpha=0.5, label='Data')
+            ax0 = p.gca()
+            ax0.set_xlabel('Pixel')
+            ax1 = p.twiny()
+            ax1.set_xlim(ax0.get_xlim())
+            ax1.set_xticks(_x)
+            _wv = [] 
+            for _xi in _x:
+                if _xi < 0 or _xi >= len(row2): _wv.append('{:.4f}'.format(wv2[-1]))
+                else: _wv.append('{:.4f}'.format(wv2[_xi]))
+            ax1.set_xticklabels(_wv)
+            ax1.set_xlabel('$\lambda (\mu m)$')
+            p.text((i1+i0)/2., np.mean(_y), '{:.4f}-{:.4f} $\mu m$'.format(reflam0,reflam1))
+
+            #ax1.plot([lam0,lam0],[-1e10,1e10], color='orange')
+            #ax1.plot([lam1,lam1],[-1e10,1e10], color='red')
+
+        # Now go through each pixel that contains some of refwave bin
+        # integrate areas under "sane" 2nd order poly
+        newpixvalue = 0
+        for ipix in range(i0, i1+1): # for each pixel to integrate
+            lim2 = wv_lims2[ipix]
+            pixlam0, pixlam1 = lim2
+
+            if reflam0 <= pixlam0 and reflam1 >= pixlam1: 
+                # both edges outside pixel, include whole pixel
+                newpixvalue += row2[ipix]
+                if plot: ax0.plot([ipix-0.5,ipix+0.5],[row2[ipix]]*2, color='r', lw=4)
+            else:
+                # Partial pixel to include, need to integrate, so calculate polynomial
+                if ipix == 0:
+                    # linear on endpoints, not quad, since no 3rd pixel
+                    f0, f1, f2 = 0, row2[ipix], row2[ipix+1]
+                    a, b, c = 0, f2-f1, f1
+                elif ipix == len(row2)-1:
+                    f0, f1, f2 = row2[ipix-1], row2[ipix], 0
+                    a, b, c = 0, f1-f0, f1
+                else:
+                    f0, f1, f2 = row2[ipix-1], row2[ipix], row2[ipix+1]
+                    a, b, c = quad_coeffs(f0,f1,f2)
+
+                wvarea = pixlam1-pixlam0
+                if reflam0 > pixlam0 and reflam1 < pixlam1: 
+                    # both edges inside pixel
+                    x0 = (reflam0-pixlam0) / wvarea - 0.5
+                    x1 = (pixlam1-reflam1) / wvarea - 0.5
+                elif reflam0 > pixlam0: # and lam1 > lim2[1]: 
+                    # Left edge
+                    # integrate from lam0 to lim2[1]
+                    x0 = ((reflam0-pixlam0) / wvarea) - 0.5
+                    x1 = 0.5 # lim2[1]
+                elif reflam1 < pixlam1: # and lam0 < lim2[0]
+                    # Right edge
+                    # integrate from lim2[0] to lam1
+                    x0 = -0.5 # lim2[0]
+                    x1 = (reflam1-pixlam0) / wvarea - 0.5
+                else:
+                    assert False, 'Case not accounted for: Ref {:.7f}-{:.7f}, Pix {:.7f}-{:.7f}'.format(reflam0,reflam1,pixlam0,pixlam1)
+
+                area = int_quad(x0,x1,a,b,c)
+                if area < 0:
+                    #print 'Area negative for lam={}, pix={}, set to 0'.format(lim1,ipix)
+                    area = 0
+                newpixvalue += area
+
+                if plot:
+                    _x = np.linspace(-.5,.5,100)
+                    _xl = np.linspace(-1.5,1.5,100)
+                    ax0.plot(ipix+_x, a*_x**2+b*_x+c, label='Area {:.2f}'.format(area), lw=4, color='C{}'.format(ipix-i0), zorder=10)
+                    ax0.plot(ipix+_xl, a*_xl**2+b*_xl+c, label='Area {:.2f}'.format(area), ls='--', color='C{}'.format(ipix-i0))
+                    ax0.plot([ipix+x0,ipix+x1],[f1]*2, color='r', lw=4)
+        if plot: 
+            p.legend()
+            p.show()
+        new_row2.append(newpixvalue)
+    return new_row2
+
+def interp_wave_grid(wave_ref, wave_grid, image, mask, tol=0.01, interp_kind='linear'):
+    '''
+    Interpolate image to new wavelength grid (linear interpolation or quad)   
     '''
     from data import view_frame_image as view
     assert image.shape == mask.shape, 'Image and mask should be of the same shape'
@@ -155,7 +287,8 @@ def interp_wave_grid(wave_ref, wave_grid, image, mask, tol=0.01):
     new_mask = np.empty(mask.shape)
     for i in range(len(image)):
         wave, row, mrow = wave_grid[i], image[i], mask[i].astype(float) 
-        new_row = np.interp(wave_ref, wave, row)
+        fn = interp1d(wave, row, kind=interp_kind, bounds_error=False) # 1D kind (cubic, linear etc)
+        new_row = fn(wave_ref)
         new_image[i] = new_row
 
         new_mrow = np.interp(wave_ref, wave, mrow)
@@ -164,6 +297,23 @@ def interp_wave_grid(wave_ref, wave_grid, image, mask, tol=0.01):
     #view(new_mask, cbar=False)
     new_mask = new_mask > tol
     #view(new_mask, cbar=False, cmap='binary_r')
+    return new_image, new_mask
+
+def interp_wave_grid_sane(wave_ref, wave_grid, image, mask, tol=0.01, plot=False):
+    '''
+    Interpolate image to new wavelength grid (linear interpolation or quad)   
+    '''
+    assert image.shape == mask.shape, 'Image and mask should be of the same shape'
+    new_image = np.empty(image.shape)
+    new_mask = np.empty(mask.shape)
+    for i in range(len(image)):
+        wave, row, mrow = wave_grid[i], image[i], mask[i].astype(float) 
+        new_row = interp_sanity_quad(wave_ref, wave, row, plot=plot)
+        new_image[i] = new_row
+
+        new_mrow = interp_sanity_quad(wave_ref, wave, mrow, plot=False)
+        new_mask[i] = new_mrow
+    new_mask = new_mask > tol
     return new_image, new_mask
 
 

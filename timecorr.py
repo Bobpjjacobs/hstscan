@@ -324,7 +324,7 @@ def jdutc2jdtdb(jd_utc, source_dir='/home/jacob/hstscan/src/'):
 
     if pyear > uyear or pmonth >= 6 and umonth < 6:
     # if Jan 1st or Jul 1st has passed without an update, update
-        #print 'Skipping tai-utc update... (hack)'
+        #Skipping tai-utc update...
         pass
         #print 'Fetching new tai-utc file'
         #command = 'wget --timeout=5 -NP '+source_dir+' ftp://maia.usno.navy.mil/ser7/tai-utc.dat'

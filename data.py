@@ -1,13 +1,10 @@
 #provides all imports
 import my_fns as f
-from my_fns import pyfits, np, ds9, types, p, subprocess, os
+from my_fns import pyfits, np, types, p, subprocess, os
+import reduction as r
 from data import *
 from my_errors import *
 import timecorr
-
-"""
-Data are stored in /net/glados2.science.uva.nl/api/jarcang1 directory, not backed up.
-"""
 
 def read_conf_file(fname):
     '''
@@ -31,18 +28,20 @@ def read_conf_file(fname):
                     val = True
                 elif val.lower() == 'false':
                     val = False
-                elif key in ['n_masks','cr_tol','cr_sigma','cr_width','cr_thresh','s','v_0','q','s_clip','s_cosmic','fit_tol']:
+                elif key in ['n_masks','cr_tol','s','v_0','q','s_clip','s_cosmic','fit_tol']:
                     val = float(val)
                 elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width']:
                     val = int(val)
                 elif key == 'dq_flags':
                     # 4: Bad detector pixel, 32: Unstable photometric response, 256: Saturated, 512: Bad flat field
-                    if val == 'None': val = None
+                    if val == 'None': 
+                        val = None
                     else:
                         val = val.split(',')
                         val = [ int(v) for v in val ]
                 elif key == 'cr_replace' or key=='dq_replace':
-                    if val.lower == 'nan': val = np.nan
+                    if val.lower() == 'nan': val = np.nan
+                    elif val.lower() in ['mean', 'median']: pass
                     else:
                         try: val = float(val)
                         except ValueError: pass # string
@@ -53,55 +52,17 @@ def read_conf_file(fname):
                 kwargs[key] = val
     return kwargs
 
-def obj_ds9(obj):
-    '''
-    Adds ds9 method to an object.
-    '''
-
-    def ds9(self):
-        '''
-        Open the image in ds9 by plotting the current data values.
-        Has to save the data to a temporary file.
-        This is really a class method but not attached to a class.'''
-        t_id = str(int(np.random.uniform(0,1000))) #avoids multiple uses interfering most of the time
-
-        temp_hdu = pyfits.PrimaryHDU(self.data)
-        #temp_hdu.header = self.hdu.header #doesn't appear to need original header values
-        temp_hdulist = pyfits.HDUList([temp_hdu])
-        temp_file = '/home/jarcang1/Downloads/temp_'+t_id+'.fits'
-        temp_hdulist.writeto(temp_file)
-
-        bash_command = '/scratch/jarcang1/src/ds9 {}'.format(temp_file)
-        subprocess.call(bash_command,shell=True,executable='/bin/bash')
-
-        os.remove(temp_file) #cleanup
-
-    #bind_method(Greeter, 'ds9', ds9) something to do with python 3
-    try:
-        obj.ds9 = types.MethodType(ds9, obj)
-    except AttributeError:
-        pass
-    return obj
-
-class BasicFits():
-    '''Just some basic utility for objects made from fits files'''
-
-    def fv(self):
-        '''Open the original file in fv.'''
-        bash_command = '/scratch/jarcang1/src/fv5.3/fv {}'.format(self.filename)
-        subprocess.call(bash_command,shell=True,executable='/bin/bash')
-
 class Single_ima():
     '''
     One exposure from the ima fits file.
     Supports composition by addition and subtraction of pixel values.
     '''
-    def __init__(self,SCI=pyfits.ImageHDU(0),ERR=pyfits.ImageHDU(0),DQ=pyfits.ImageHDU(0),SAMP=pyfits.ImageHDU(0),TIME=pyfits.ImageHDU(0),nobj=1):
+    def __init__(self, SCI=pyfits.ImageHDU(0), ERR=pyfits.ImageHDU(0), DQ=pyfits.ImageHDU(0), SAMP=pyfits.ImageHDU(0), TIME=pyfits.ImageHDU(0), nobj=1):
 
         # do some weird things to make sure the image data is read into the memory
         junk = [SCI.data, ERR.data, DQ.data, SAMP.data, TIME.data]
 
-        self.SCI = obj_ds9(SCI) #tacks ds9 viewing onto the data HDU
+        self.SCI = SCI
         self.ERR = ERR
         self.DQ = DQ
         self.SAMP = SAMP
@@ -145,17 +106,6 @@ class Single_ima():
         TIME = self.TIME
         return Single_ima(SCI,ERR,DQ,SAMP,TIME,nobj=nobj)
 
-    def fv(self):
-        '''Save file temporarily to view the SCI in fv'''
-        t_id = str(int(np.random.uniform(0,1000))) #avoids multiple uses interfering most of the time
-
-        temp_hdulist = pyfits.HDUList([self.SCI])
-        temp_file = '/home/jarcang1/Downloads/temp_'+t_id+'.fits'
-        temp_hdulist.writeto(temp_file)
-        bash_command = '/scratch/jarcang1/src/fv5.3/fv {}'.format(temp_file)
-        subprocess.call(bash_command,shell=True,executable='/bin/bash')
-        os.remove(temp_file)
-
     def remove_bad_pix(self, int_flags=[4,32,512], replace=np.NAN, width=1):
         '''
         Removes pixels that have been flagged as bad according to calwf3.
@@ -178,32 +128,12 @@ class Single_ima():
             except AttributeError:
                 raise_wtih_traceback(InputError('The file has no DQ data or mask.'))
 
-        '''
-        Replaced is_bad and binary string bad pixel identification with list
-        comprehension and simple check, about 20x faster
-        #convert integers to position in 16 bit binary string
-        bin_flags = []
-        for flag in int_flags:
-            flag = '{0:016b}'.format(flag)
-            bin_flags.append(flag.find('1'))
-
-        def is_bad(DQ_int):
-            #checks if a DQ value (int) is bad
-            DQ_bin = '{0:016b}'.format(int(DQ_int))
-            for i in bin_flags:
-                if DQ_bin[i] == '1':
-                    return True
-            return False
-        is_bad = np.vectorize(is_bad)
-
-        mask = is_bad(self.DQ.data)
-        '''
         mask = np.sum([ self.DQ.data/flag % 2 == 1 for flag in int_flags ], axis=0).astype(bool)
 
         self.mask = mask
         if replace == 'mean' or replace == 'median':
             self.SCI.data[mask] = np.nan
-            self.mean_nan_pix(replace=replace)
+            self.mean_nan_pix(replace=replace, width=width)
         elif replace is not None:
             self.SCI.data[mask] = replace
 
@@ -229,6 +159,25 @@ class Single_ima():
         clean_image = np.where(nans, local_mean, image)
         self.SCI.data = clean_image
 
+    def mean_mask_pix(self, mask, width=1, replace='mean'):
+        '''
+        Based off new mean nan pix
+        Remove all masked pix, replace with local median of pixels
+        within width (in pixels)
+        '''
+        image = self.SCI.data
+        images = []
+        for shiftx in np.arange(-width,width+1):
+            for shifty in np.arange(-width,width+1):
+                if shiftx == 0 and shifty == 0: continue
+                _image = np.roll(image, shifty, axis=0)
+                _image = np.roll(_image, shiftx, axis=1)
+                images.append(_image)
+        if replace == 'mean': local_mean = np.nanmean(images, axis=0)
+        elif replace == 'median': local_mean = np.nanmedian(images, axis=0)
+        clean_image = np.where(mask, local_mean, image)
+        self.SCI.data = clean_image
+
     def trim_pix(self, n=5):
         '''
         Remove n pixels from each edge.
@@ -245,42 +194,7 @@ class Single_ima():
             pass #no DQ data to trim
         self.trimmed = True
 
-    def create_row_spectrum(self,row_n=0,row=None,rows=None,plot=False,**kwargs):
-        '''
-        Returns the spectrum of the image.
-        Input the row (pixel height) to extract (can be range) OR
-        The raw row OR
-        The subset of raw rows to sum.
-        If trimmed, from 0-255, untrimmed 0-265
-        '''
-        if row != None:
-            y = row
-        elif rows != None:
-            y = np.nansum(rows,0)
-        else:
-            y = self.SCI.data[row_n] #unit of electrons after integration
-
-        x = np.arange(0,len(y)) #proxy for wavelength
-        row_spectrum = Spectrum(x,y,'Spectral Pixel','electrons')
-        if plot:
-            row_spectrum.plot(**kwargs)
-        return row_spectrum
-
-    def create_sum_spectrum(self,plot=False,**kwargs):
-        '''
-        Returns the spectrum of all the rows summed.
-        Includes background in-between reads.
-        Ignores bad pixels marked as nan.
-        '''
-        rows = [row for row in self.SCI.data]
-        y = np.nansum(rows,0) #nansum ignores bad pixels
-        x = np.arange(0,len(y))
-        self.sum_spectrum = Spectrum(x,y,'Spectral Pixel','electrons')
-        if plot:
-            self.sum_spectrum.plot(**kwargs)
-        return self.sum_spectrum
-
-class Data_ima(BasicFits):
+class Data_ima():
     '''``
     Creates object containing all the reads from the ima file.
     '''
@@ -336,16 +250,6 @@ class Data_ima(BasicFits):
             # store scan direction
             self.POSTARG2 = HDUList[0].header['POSTARG2']
 
-    def background_read(self,first,second):
-        '''
-        Take the difference between two reads.
-        The first and seconds are with respect to the time the reads were taken.
-        The results is a count of the photons collected between the two reads (background).
-        '''
-        #stored in reverse order
-        first, second = len(self.reads)-1-first, len(self.reads)-1-second
-        return self.reads[second] - self.reads[first]
-
     def close(self):
         del self
 
@@ -386,7 +290,7 @@ class Data_red(Data_ima):
                 i += 5
             self.subexposures = subexposures
 
-class Data_flt(BasicFits):
+class Data_flt():
     '''Break up an flt file into separate extensions and add methods'''
 
     def __init__(self,filename, bjd=True):
@@ -424,9 +328,6 @@ class Data_flt(BasicFits):
                 self.dt = 0
                 self.t_units = 'JD_UTC'
 
-            #add methods to the image extension
-            fits_file[1] = obj_ds9(fits_file[1])
-
             # do some weird things to make sure the image data is read into the memory
             junk = map(lambda x: x.data, fits_file)
 
@@ -448,7 +349,8 @@ class Data_flt(BasicFits):
                 i += 5
             self.reads = reads
 
-class Data_drz(BasicFits):
+
+class Data_drz():
     '''Break up a drz file into separate extensions and add methods'''
 
     def __init__(self,filename):
@@ -460,9 +362,6 @@ class Data_drz(BasicFits):
         with pyfits.open(filename, memmap=False) as fits_file:
             self.fits_file = fits_file
 
-            #add methods to the image extension
-            fits_file[1] = obj_ds9(fits_file[1])
-
             #store all the extensions
             self.Primary = fits_file[0]
             self.SCI = fits_file[1]
@@ -471,6 +370,7 @@ class Data_drz(BasicFits):
             self.HDRTAB = fits_file[4]
             self.SCI.data # otherwise the file is closed? since the data are never accessed
             
+
 
 
 ########################################
@@ -529,31 +429,6 @@ def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/h
     lines = [line[0] for line in lines if line[1].startswith('G')]
     for fname in lines:
         yield load(source_dir+fname+'_red.fits')
-
-
-'''
-    source_dir = '/home/jacob/hst_data/'+system+'/'
-    fname_times = []
-    with open(source_dir + source_file,'r') as f:
-        for line in f:
-            col = line.split()
-            fname, time = col
-            time = time[:-1]
-            fname = source_dir + fname
-            fname_times.append((fname, time))
-    fname_times.sort(key=lambda x: x[1], reverse=False)
-    fnames, times = zip(*fname_times)
-    times = np.array(times, dtype=float)
-    changes = np.diff(times.astype(float)) > 0.01 # days
-    indexes = [i+1 for i, change in enumerate(changes) if change]
-    fnames = [list(orbit) for orbit in np.split(fnames, indexes)] # split into orbits
-    #fnames = [fnames[i:i+4] for i in range(len(fnames))[::4]] # split into visits
-    # want to return exposures as a list of visits
-    # each visit contains 4/5 orbits
-    # each orbit, 9+ exposures
-    for orbit in fnames:
-        yield (load(exp) for exp in orbit[1:])
-'''
 
 def get_exp_info(source_file, data_dir, system):
 
@@ -615,36 +490,6 @@ def read_visit_names(source_file='input_image.lis', data_dir = '/net/glados2.sci
             i += 1 + n
     return sets, time_sets, dir_sets
 
-def save_visit_plots(data_dir='/net/glados2.science.uva.nl/api/jarcang1/GJ-1214/', wmin=1.15,wmax=1.63):
-
-    for source_file, scan in zip(['input_image_f.lis','input_image_r.lis'],['f','r']):
-        print source_file, scan
-        visits, times, directions = read_visit_names(source_file=source_file, append='_spec.txt')
-        for visit, time, direction in zip(visits, times, directions):
-            p.figure()
-            vis_n = 99 # default
-            for spec, t, d in zip(visit, time, direction):
-                try:
-                    vis_n = spec[:6]
-                    waves, fluxes, errors = read_spec(data_dir+spec, wmin=wmin, wmax=wmax)
-                    if d.startswith('r'):
-                        color = 'r'
-                    elif d.startswith('f'):
-                        color = 'b'
-                    flux = np.nansum(fluxes)
-                    err = np.nansum(errors)
-                    p.errorbar(t, flux, err, color=color, marker='o')
-                except IOError:
-                    print spec
-                    pass
-            p.xlabel('Exposure Time (mjd)')
-            p.title('Broadband flux between {} and {} microns'.format(wmin, wmax))
-            p.ylabel('Flux per subexposure (electrons)')
-            fname = '/scratch/jarcang1/Documents/plots/light_curves/visit_{}_lc_{}.png'.format(vis_n, scan)
-            print vis_n, scan
-            f.silentremove(fname)
-            p.savefig(fname)
-            p.close()
 
 def read_spec(fname, wmin=-np.inf, wmax=np.inf):
     with open(fname,'r') as g:
@@ -704,7 +549,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
     for waves, fluxes in zip(all_waves, all_flux):
-        shift = f.spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
+        shift = r.spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
         shift_y = np.interp(template_x, template_x+shift, fluxes)
         shift_err = np.interp(template_x, template_x+shift, errors)
         interp_spectra.append(shift_y)
@@ -874,25 +719,6 @@ def update_lists(system='WASP-18', source_dir='/home/jacob/hst_data/'):
                 for line in new_lines:
                     g.write(line)
 
-def get_scan_rate(exposure):
-        '''Get the scan rate, from those known'''
-        if exposure.Primary.header['TARGNAME'] == 'GJ-1214':
-            scan_rate = 0.12
-        elif exposure.Primary.header['TARGNAME'] == 'WASP-18':
-            scan_rate = 0.30
-        elif exposure.Primary.header['TARGNAME'] == 'WASP-43':
-            scan_rate = 0.05
-        elif exposure.Primary.header['PROPOSID'] == 12482:
-            scan_rate = 0.
-            # Kepler 9 staring mode
-        elif exposure.Primary.header['TARGNAME'] == 'WASP-19CEN':
-            # staring mode
-            scan_rate = 0.
-        elif exposure.Primary.header['TARGNAME'] == 'WASP-80' and exposure.Primary.header['PROPOSID'] == 14260:
-            scan_rate = 0.22
-        else:
-            raise myerr.InputError('Scan rate unknown',None)
-        return scan_rate
 #################
 # Viewing tools #
 #################
@@ -1072,8 +898,6 @@ def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/a
 #             Save reduced data            #
 ############################################
 
-# root_dir = '/net/glados2.science.uva.nl/api/jarcang1'
-
 def create_sub_history(t):
     history = ['~~~~~~~~~~~~~~~~~~~~~~~~~~~','CUSTOM REDUCTION PIPELINE','~~~~~~~~~~~~~~~~~~~~~~~~~~~']
     history.append('flat field correction was set to {}'.format(t.flat_field))
@@ -1082,9 +906,6 @@ def create_sub_history(t):
     history.append('local cosmic ray removal set to {}'.format(t.cr_local))
     if t.cr_local:
         history.append('            - with tolerance {} replacing with {}'.format(t.cr_tol,t.cr_replace))
-    history.append('sliding median filter cosmic ray removal set to {}'.format(t.cr_slide))
-    if t.cr_slide:
-        history.append('            - low threshold of {} electrons and {} sigma'.format(t.cr_thresh,t.cr_sigma))
     history.append('DQ flagged pixels replaced with {}'.format(t.dq_replace))
     return history
 
@@ -1122,6 +943,7 @@ def write_reduced_fits(subexposures, Primary, t, dest_dir=None):
     print('Saving reduced exposure to {}...'.format(fname))
     hdu.writeto(fname)
     hdu.close()
+
 
 
 ############################################
@@ -1170,7 +992,7 @@ def make_input_image_list(data_dir='/home/jacob/hst_data/'):
     os.nice(20)
     all_lines = []
     for file in sorted(os.listdir(data_dir)):
-        if file.startswith('visit') and file.endswith('.lis'):
+        if file.startswith('visit') and file.endswith('.lis') and not file.startswith('visit_driz'):
             with open(data_dir+file, 'r') as g:
                 lines = g.readlines()
             lines = [line for line in lines if not line.startswith('#')]
@@ -1213,7 +1035,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
 
                 j += 1
                 print 'Starting file', j, 'for visit', no
-                exp = load(data_dir + file)
+                exp = load(data_dir + file, bjd=True)
                 t = exp.t
                 filt = exp.Primary.header['FILTER']
                 rootname = exp.Primary.header['ROOTNAME']
@@ -1252,71 +1074,6 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
         if rootname in l_rootname:
             return cat, cat_rootname
 
-
-
-# The programs below are reduntant, used pure python
-
-############################################
-##### Programs to do timings with IDL ######
-############################################
-
-'''
-Shell script file is:
-
-idl_timings.sh
-
-    #! /bin/bash
-
-    if [ ! -f data_file ]; then
-        echo "File does not exist before, good."
-    fi
-    if [ -f data_file ]; then
-        echo "File does exist before, bad."
-    fi
-
-
-    idl <<!here
-    .rnew temp_timings.pro
-    @temp_timings
-    !here
-
-    if [ ! -f data_file ]; then
-        echo "File does not exist after, bad"
-    fi
-    if [ -f data_file ]; then
-        echo "File does exist after, good!"
-    fi
-
-    exit
-'''
-
-def make_idl_scripts(jd_utc, RA, DEC, rootname, data_file='/scratch/jarcang1/Downloads/temp_utc2bjd.dat'):
-    idlname = '{}_timings.pro'.format(rootname)
-    f.silentremove(idlname)
-    pro_text = ';; Temporary file used in timing corrections for HST data using IDL\njd_utc = {}\nRA = {}\nDEC = {}\nbjd_tdb = UTC2BJD(jd_utc, ra, dec, spaceobs=\'HST\',/time_diff)\nPRINT, bjd_tdb\nOPENW, 1, FILEPATH(\'{}\', ROOT_DIR=[\'/\'])\nPRINTF, 1, bjd_tdb\nCLOSE, 1\nFREE_LUN, 1'.format(jd_utc, RA, DEC, data_file)
-    with open(idlname, 'w') as g:
-        g.write(pro_text)
-    os.system('chmod +x {}'.format(idlname))
-
-    shname = '{}_timings.sh'.format(rootname)
-    f.silentremove(shname)
-    sh_text = '#! /bin/bash\nidl <<!here\n@{}\n!here\nexit'.format(idlname.strip('.pro'))
-    with open(shname, 'w') as g:
-        g.write(sh_text)
-    os.system('chmod +x {}'.format(shname))
-    return idlname, shname
-
-def remove_idl_scripts(rootname):
-    idlname = '{}_timings.pro'.format(rootname)
-    shname = '{}_timings.sh'.format(rootname)
-    f.silentremove(idlname)
-    f.silentremove(shname)
-
-def read_dt_file(data_file='/scratch/jarcang1/Downloads/temp_utc2bjd.dat'):
-    '''Read the results of the IDL timing correction'''
-    with open(data_file, 'r') as g:
-        line = g.readline()
-    return float(line.strip()) # BJD_TDB-JD_UTC
 
 #####################################
 ## Tools for reading emcee results ##
@@ -1437,3 +1194,40 @@ def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'
 
                 g.write(line)
             # catalogue create for direct image
+
+
+
+############################################
+#                    misc                  #
+############################################
+
+#FILTER, dx, dxerr, dy, dyerr, shift, shifterr 
+filt_data = [['F098M', 0.150, 0.026, 0.268, 0.030, 0.309, 0.034], 
+             ['F140W', 0.083, 0.020, 0.077, 0.022, 0.113, 0.030], 
+             ['F153M', 0.146, 0.022, -0.106, 0.029, 0.186, 0.036], 
+             ['F139M', 0.110, 0.022, 0.029, 0.028, 0.114, 0.036], 
+             ['F127M', 0.131, 0.023, -0.055, 0.024, 0.143, 0.034], 
+             ['F128N', 0.026, 0.022, -0.093, 0.021, 0.095, 0.030], 
+             ['F130N', 0.033, 0.014, 0.004, 0.019, 0.030, 0.024], 
+             ['F132N', 0.039, 0.018, 0.154, 0.022, 0.155, 0.028], 
+             ['F126N', 0.264, 0.018, 0.287, 0.025, 0.389, 0.031], 
+             ['F167N', 0.196, 0.012, -0.005, 0.013, 0.200, 0.018], 
+             ['F164N', 0.169, 0.022, -0.125, 0.024, 0.214, 0.032], 
+             ['F160W', 0.136, 0.013, 0.046, 0.016, 0.149, 0.021], 
+             ['F125W', 0.046, 0.022, 0.195, 0.023, 0.206, 0.032], 
+             ['F110W', -0.037, 0.023, 0.209, 0.029, 0.214, 0.037], 
+             ['F105W', 0.015, 0.023, 0.027, 0.030, 0.036, 0.038]]
+
+def get_wfc3_filter_offs(filt):
+    # Different filters have different inherent direct image offsets, refer to:
+    #http://www.stsci.edu/hst/wfc3/documents/ISRs/WFC3-2010-12.pdf
+    # copied into table above
+    # this is because the conf file was made using the F140W filter
+    filts = [ fd[0] for fd in filt_data ]
+    try:
+        i = filts.index(filt)
+        dx, dy = filt_data[i][1], filt_data[i][3]
+        return dx, dy
+    except: # filter missing
+        return None, None
+
