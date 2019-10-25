@@ -39,13 +39,12 @@ def get_fielddep_coeffs(xs, ys, COEFFS, ms=None, permute_arrays=[None]*2):
     if ms is None: 
         ms = map(cal.calc_poly_order, [COEFFS[1], COEFFS[0]])
 
-     # at (DYDX_A_1) or aw (DLDP_A_1)
+    # at (DYDX_A_1) or aw (DLDP_A_1)
     a = cal.field_dep_coeff(ms[0], COEFFS[1], xs, ys, permute_arrays=permute_arrays[0])
     # bt (DYDX_A_0) or bw (DLDP_A_0)
     b = cal.field_dep_coeff(ms[1], COEFFS[0], xs, ys, permute_arrays=permute_arrays[1])
 
     return a, b
-
 
 def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend, 
                         wvmin=1., wvmax=1.8, DISP_COEFFS=None, TRACE_COEFFS=None, wdpt_grid_y=20, wdpt_grid_lam=20,
@@ -59,13 +58,12 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
     # Pre-compute some steps for speed since need to do this at all gridpoints
     ms = map(cal.calc_poly_order, [TRACE_COEFFS[1], TRACE_COEFFS[0],DISP_COEFFS[1],DISP_COEFFS[0]])
 
-
     # Now generate a grid of (wavelength, xl, yl) used to calculate the w.d.p.t.    
     grid = []
     for lam in lams:
         for ys in yss:
             at, bt = get_fielddep_coeffs(x1s, ys, TRACE_COEFFS, ms=ms[:2])
-            aw, bw = get_fielddep_coeffs(x1s, ys, DISP_COEFFS, ms=ms[2:])
+            aw, bw = get_fielddep_coeffs(x1s, ys, DISP_COEFFS,  ms=ms[2:])
             xl = x1s - at*bt / (1+at**2) + (lam - bw)/aw*np.cos(np.arctan(at))
             yl = at*(xl-x1s) + bt + ys
             grid.append([lam, xl, yl])
@@ -81,7 +79,7 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
         '''Wavelength dependent photon trajectory'''
         return (c1/(c2+l)+c3) + (s1/(s2+l) + s3)*xl 
 
-    def get_ys(x,y,xs=x1s):
+    def get_ys(x, y, xs=x1s):
         '''
         Find position of ys whose trace goes through x,y
         trace eq: y-y* = at(x-x*)+bt
@@ -94,20 +92,22 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
         c = (atn[0]+atn[1]*xs+atn[3]*xs**2)*(x-xs) + btn[0]+btn[1]*xs - y
         det = b*b - 4*a*c
         # return both solutions and pick physical one yourself
-        assert det >= 0, 'Negative det, imaginary solutions only'
+        '''assert np.all(det >= 0), 'Negative det, imaginary solutions only'
         if a == 0.:
-            assert b != 0, 'Non-sensical equation for y*, a=b=0'
+            assert np.all(b != 0), 'Non-sensical equation for y*, a=b=0'
             return -c/b, -c/b
         else:
-            return (-b+det**0.5)/(2*a), (-b-det**0.5)/(2*a)
+            return (-b+det**0.5)/(2*a), (-b-det**0.5)/(2*a)'''
+        return np.where( a == 0, (-c/b, -c/b), ((-b+det**0.5)/(2*a), (-b-det**0.5)/(2*a)) )
 
 
-    def inv_wdpt(x,y):
+    def inv_wdpt(x, y, ys=None):
         '''More usefully calculate the wavelength given a position on the detector'''
         # First find direct image position that correspons to this trace
-        ys1, ys2 = get_ys(x,y,xs=x1s)
-        if abs(ys1-y) < abs(ys2-y): ys = ys1
-        else: ys = ys2
+        if ys is None:
+            ys1, ys2 = get_ys(x,y,xs=x1s)
+            if abs(ys1-y) < abs(ys2-y): ys = ys1
+            else: ys = ys2
         aw, bw = get_fielddep_coeffs(x1s, ys, DISP_COEFFS, ms=ms[2:])
 
         # use DISP soln to get lambda (wavelength)
@@ -119,12 +119,20 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
     # Finaly compute wavelength solution
     wave_grid = np.empty((yend-ystart,200))
     x = np.arange(x0,x0+200)+(512-0.5*L); y = np.arange(ystart, yend)+(512-0.5*L)
+    
+    # Compute ystar (ys) positions, array-wise
+    x_grid, y_grid = np.meshgrid(x, y)
+    inv_yss1, inv_yss2 = get_ys(x_grid, y_grid)
+    inv_yss = np.where(abs(inv_yss1-y_grid)<abs(inv_yss2-y_grid), inv_yss1, inv_yss2)
+
     for i in range(yend-ystart):
         for j in range(200):
             xi, yi = x[j], y[i]
-            lam = inv_wdpt(xi,yi)
+            ys = inv_yss[i, j]
+            lam = inv_wdpt(xi,yi,ys=ys)
             assert not np.isnan(lam), 'x{}-y{}\nNaN wavelength'.format(xi, yi)
             wave_grid[i,j] = lam
+
     return wave_grid
 
 def sum_to_spectrum_linear(image, wave_grid, x0, ystart, yend, wave_bins=np.linspace(1.14,1.6,15)):
@@ -168,7 +176,7 @@ def int_quad(x1, x2, a, b, c):
     return a/3.*(x2**3-x1**3) + b/2.*(x2**2-x1**2) + c*(x2-x1)
 
 
-def interp_sanity_quad(wv1, wv2, row2, plot=False):
+def interp_sanity_quad(wv1, wv2, row2, plot=False, zero=1e-6):
     '''
     Interpolate spectrum (wv2,row2) to new wavelengths (wv1) using "sane" quadratic
     '''
@@ -186,94 +194,75 @@ def interp_sanity_quad(wv1, wv2, row2, plot=False):
     new_row2 = []
     for lim1 in wv_lims1: # for each reference (new) wavebin
         reflam0, reflam1 = lim1
-        # get index of respective bins on the edges
-        i0, i1 = np.argmin(abs(wv2-reflam0)), np.argmin(abs(wv2-reflam1))
+        # Fix edgecases by essentially defining zero outside
+        if (reflam0 < min(wv2) and reflam1 < min(wv2)) or (reflam0 > max(wv2) and reflam1 > max(wv2)):
+            newpixvalue = zero # if it is actually zero may be a problem
+        
+        else:
+            if reflam0 < min(wv2): relam0 = min(wv2)
+            if reflam1 > max(wv2): reflam1 = max(wv2)
 
-        if plot:
-            # Make a plot for a given wave bin showing contributions
-            _x = np.arange(i0-2,i1+3,1)
-            _y = [] 
-            for _xi in _x:
-                if _xi < 0 or _xi >= len(row2): _y.append(0)
-                else: _y.append(row2[_xi])
+            # get index of respective bins on the edges
+            i0, i1 = np.argmin(abs(wv2-reflam0)), np.argmin(abs(wv2-reflam1))
 
-            #p.bar(_x, _y, width=1, color='k', alpha=0.5, label='Data')
-            p.plot(_x, _y, color='None', ls='None', marker='None')
-            p.gca().set_autoscale_on(False)
-            p.bar(_x, _y, width=1, color='k', alpha=0.5, label='Data')
-            ax0 = p.gca()
-            ax0.set_xlabel('Pixel')
-            ax1 = p.twiny()
-            ax1.set_xlim(ax0.get_xlim())
-            ax1.set_xticks(_x)
-            _wv = [] 
-            for _xi in _x:
-                if _xi < 0 or _xi >= len(row2): _wv.append('{:.4f}'.format(wv2[-1]))
-                else: _wv.append('{:.4f}'.format(wv2[_xi]))
-            ax1.set_xticklabels(_wv)
-            ax1.set_xlabel('$\lambda (\mu m)$')
-            p.text((i1+i0)/2., np.mean(_y), '{:.4f}-{:.4f} $\mu m$'.format(reflam0,reflam1))
+            # Now go through each pixel that contains some of refwave bin
+            # integrate areas under "sane" 2nd order poly
+            newpixvalue = 0
+            for ipix in range(i0, i1+1): # for each pixel to integrate
+                lim2 = wv_lims2[ipix]
+                pixlam0, pixlam1 = lim2
 
-            #ax1.plot([lam0,lam0],[-1e10,1e10], color='orange')
-            #ax1.plot([lam1,lam1],[-1e10,1e10], color='red')
-
-        # Now go through each pixel that contains some of refwave bin
-        # integrate areas under "sane" 2nd order poly
-        newpixvalue = 0
-        for ipix in range(i0, i1+1): # for each pixel to integrate
-            lim2 = wv_lims2[ipix]
-            pixlam0, pixlam1 = lim2
-
-            if reflam0 <= pixlam0 and reflam1 >= pixlam1: 
-                # both edges outside pixel, include whole pixel
-                newpixvalue += row2[ipix]
-                if plot: ax0.plot([ipix-0.5,ipix+0.5],[row2[ipix]]*2, color='r', lw=4)
-            else:
-                # Partial pixel to include, need to integrate, so calculate polynomial
-                if ipix == 0:
-                    # linear on endpoints, not quad, since no 3rd pixel
-                    f0, f1, f2 = 0, row2[ipix], row2[ipix+1]
-                    a, b, c = 0, f2-f1, f1
-                elif ipix == len(row2)-1:
-                    f0, f1, f2 = row2[ipix-1], row2[ipix], 0
-                    a, b, c = 0, f1-f0, f1
+                if reflam0 <= pixlam0 and reflam1 >= pixlam1: 
+                    # both edges outside pixel, include whole pixel
+                    newpixvalue += row2[ipix]
+                    if plot: ax0.plot([ipix-0.5,ipix+0.5],[row2[ipix]]*2, color='r', lw=4)
                 else:
-                    f0, f1, f2 = row2[ipix-1], row2[ipix], row2[ipix+1]
-                    a, b, c = quad_coeffs(f0,f1,f2)
+                    # Partial pixel to include, need to integrate, so calculate polynomial
+                    if ipix == 0:
+                        # linear on endpoints, not quad, since no 3rd pixel
+                        f0, f1, f2 = 0, row2[ipix], row2[ipix+1]
+                        a, b, c = 0, f2-f1, f1
+                    elif ipix == len(row2)-1:
+                        f0, f1, f2 = row2[ipix-1], row2[ipix], 0
+                        a, b, c = 0, f1-f0, f1
+                    else:
+                        f0, f1, f2 = row2[ipix-1], row2[ipix], row2[ipix+1]
+                        a, b, c = quad_coeffs(f0,f1,f2)
 
-                wvarea = pixlam1-pixlam0
-                if reflam0 > pixlam0 and reflam1 < pixlam1: 
-                    # both edges inside pixel
-                    x0 = (reflam0-pixlam0) / wvarea - 0.5
-                    x1 = (pixlam1-reflam1) / wvarea - 0.5
-                elif reflam0 > pixlam0: # and lam1 > lim2[1]: 
-                    # Left edge
-                    # integrate from lam0 to lim2[1]
-                    x0 = ((reflam0-pixlam0) / wvarea) - 0.5
-                    x1 = 0.5 # lim2[1]
-                elif reflam1 < pixlam1: # and lam0 < lim2[0]
-                    # Right edge
-                    # integrate from lim2[0] to lam1
-                    x0 = -0.5 # lim2[0]
-                    x1 = (reflam1-pixlam0) / wvarea - 0.5
-                else:
-                    assert False, 'Case not accounted for: Ref {:.7f}-{:.7f}, Pix {:.7f}-{:.7f}'.format(reflam0,reflam1,pixlam0,pixlam1)
+                    wvarea = pixlam1-pixlam0
+                    if reflam0 > pixlam0 and reflam1 < pixlam1: 
+                        # both edges inside pixel
+                        x0 = (reflam0-pixlam0) / wvarea - 0.5
+                        x1 = (pixlam1-reflam1) / wvarea - 0.5
+                    elif reflam0 > pixlam0: # and lam1 > lim2[1]: 
+                        # Left edge
+                        # integrate from lam0 to lim2[1]
+                        x0 = ((reflam0-pixlam0) / wvarea) - 0.5
+                        x1 = 0.5 # lim2[1]
+                    elif reflam1 < pixlam1: # and lam0 < lim2[0]
+                        # Right edge
+                        # integrate from lim2[0] to lam1
+                        x0 = -0.5 # lim2[0]
+                        x1 = (reflam1-pixlam0) / wvarea - 0.5
+                    else:
+                        assert False, 'Case not accounted for: Ref {:.7f}-{:.7f}, Pix {:.7f}-{:.7f}'.format(
+                                                                reflam0,reflam1,pixlam0,pixlam1)
 
-                area = int_quad(x0,x1,a,b,c)
-                if area < 0:
-                    #print 'Area negative for lam={}, pix={}, set to 0'.format(lim1,ipix)
-                    area = 0
-                newpixvalue += area
+                    area = int_quad(x0,x1,a,b,c)
+                    if area < 0:
+                        #print 'Area negative for lam={}, pix={}, set to 0'.format(lim1,ipix)
+                        area = 0
+                    newpixvalue += area
 
-                if plot:
-                    _x = np.linspace(-.5,.5,100)
-                    _xl = np.linspace(-1.5,1.5,100)
-                    ax0.plot(ipix+_x, a*_x**2+b*_x+c, label='Area {:.2f}'.format(area), lw=4, color='C{}'.format(ipix-i0), zorder=10)
-                    ax0.plot(ipix+_xl, a*_xl**2+b*_xl+c, label='Area {:.2f}'.format(area), ls='--', color='C{}'.format(ipix-i0))
-                    ax0.plot([ipix+x0,ipix+x1],[f1]*2, color='r', lw=4)
-        if plot: 
-            p.legend()
-            p.show()
+                    if plot:
+                        _x = np.linspace(-.5,.5,100)
+                        _xl = np.linspace(-1.5,1.5,100)
+                        ax0.plot(ipix+_x, a*_x**2+b*_x+c, label='Area {:.2f}'.format(area), lw=4, color='C{}'.format(ipix-i0), zorder=10)
+                        ax0.plot(ipix+_xl, a*_xl**2+b*_xl+c, label='Area {:.2f}'.format(area), ls='--', color='C{}'.format(ipix-i0))
+                        ax0.plot([ipix+x0,ipix+x1],[f1]*2, color='r', lw=4)
+            if plot: 
+                p.legend()
+                p.show()
         new_row2.append(newpixvalue)
     return new_row2
 
@@ -299,7 +288,7 @@ def interp_wave_grid(wave_ref, wave_grid, image, mask, tol=0.01, interp_kind='li
     #view(new_mask, cbar=False, cmap='binary_r')
     return new_image, new_mask
 
-def interp_wave_grid_sane(wave_ref, wave_grid, image, mask, tol=0.01, plot=False):
+def interp_wave_grid_sane(wave_ref, wave_grid, image, mask, tol=0.01):
     '''
     Interpolate image to new wavelength grid (linear interpolation or quad)   
     '''
@@ -308,10 +297,10 @@ def interp_wave_grid_sane(wave_ref, wave_grid, image, mask, tol=0.01, plot=False
     new_mask = np.empty(mask.shape)
     for i in range(len(image)):
         wave, row, mrow = wave_grid[i], image[i], mask[i].astype(float) 
-        new_row = interp_sanity_quad(wave_ref, wave, row, plot=plot)
+        new_row = interp_sanity_quad(wave_ref, wave, row)
         new_image[i] = new_row
 
-        new_mrow = interp_sanity_quad(wave_ref, wave, mrow, plot=False)
+        new_mrow = interp_sanity_quad(wave_ref, wave, mrow)
         new_mask[i] = new_mrow
     new_mask = new_mask > tol
     return new_image, new_mask

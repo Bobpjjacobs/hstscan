@@ -359,22 +359,6 @@ def rectangle_bg(source_image, row, col, debug=False):
     return bg
 
 
-'''
-import numpy as np
-
-a = np.array([[1, 2, 3],
-              [4, 5, 6],
-              [7, 8, 9]])
-
-index = [1, 3]
-n_b = a.shape[0] + len(index)
-
-not_index = np.array([k for k in range(n_b) if k not in index])
-
-b = np.zeros((n_b, n_b), dtype=a.dtype)
-b[not_index.reshape(-1,1), not_index] = a
-'''
-
 def calc_image_background(image, box_h, psf_h, debug=False, above=False):
     '''
     Returns a 2D image of the background. Interpolate under the spectrum.
@@ -463,6 +447,7 @@ when there are many pixels masked out but also will include a background spectru
 
 These are marked by 512? in the DQ array, but cannot interpolate over them 
 so probably best to just leave them and ignore the rows that are overly effected
+Only if the effect seems obvious on the pixels, otherwise just ignore altogether.
 '''
 
 def blobs(mask):
@@ -499,7 +484,7 @@ def has_blobs(mask, tol=4):
 ########################################
 
 
-def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, maxmax=8e4):
+def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, maxmax=8e4, thresh=50.):
     '''
     Filter cosmic rays by using a local median of pixels
     First compute median in x and y, using sx and sy number of pixels either side
@@ -525,6 +510,8 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
             # std of the pixels
             residuals = np.abs(image - medimage)
             mask = np.abs(residuals) > tol*stdimage
+            # ignore tiny hits
+            mask = np.logical_and(mask, residuals > thresh)
             masks.append(mask); medimages.append(medimage)
     
     mask = np.sum(masks, axis=0) == len(masks) # if both are flagged, flag
@@ -609,112 +596,32 @@ def find_box(source_image, h=40, sign='p', refine=False):
 # 				  and stretch		  	     #
 ##############################################
 
-def spec_pix_shift(template_x, template_y, x, y, debug=False):
+from scipy.optimize import curve_fit
+
+def spec_pix_shift(template_x, template_y, x, y, norm=True):
     '''
     Calculate optimal shift in wavelength by cross-correlation.
     Input template_x and x assumed to be in microns
     template_y and y should have been already normalised
+
+    Returns shift between x and template_x, e.g. f(x + shift) = f2(template_x)
     '''
-    def min_func(shift):
-        shift_y = np.interp(template_x, template_x+shift, y)
-        return template_y - shift_y
-    results = leastsq(min_func, x0=0.01, full_output=True)
-    success = results[-1] in [1,2,3,4]
-    shift = results[0][0]
-    assert success, 'Fitting failed'
-    if debug:
-        p.title('Shift: {:.6g} microns or ~{:.2f} pixels'.format(shift, shift/0.0045))
-        p.plot(template_x, np.interp(template_x, template_x+shift, y), label='Shifted')
-        p.plot(x, y, label='Original')
-        p.plot(template_x, template_y, ls='--', label='Template')
-        p.legend()
-        p.show()
-        diff = np.max(np.interp(template_x, template_x+shift, y)-y)
-        p.title('Difference {:.2g} electrons ({:.2f}%)'.format(diff, diff/max(y)*10**2))
-        p.plot(template_x, np.interp(template_x, template_x+shift, y)-template_y, label='Difference from template')
-        p.show()
-    return shift
+    if norm:
+        template_y = template_y / np.sum(template_y)
+        y = y / np.sum(y)
 
-def fit_absorbtion(flux, p1, p2):
-	'''
-	Fit a gaussian to an abosrbtion line in a spectrum.
-	Used to determine spectrum stretch when two absorbtion
-	lines move apart/closer.
-	'''
-	absorbtion = flux[p1:p2]
-	x = range(len(absorbtion))
-
-	def abs_gauss(x, m, s, C, A):
-		return C - A*np.exp((x-m)**2/(2*s**2))
-
-	def fit_fn(coefs):
-		m, s, C, A = coefs
-		model = abs_gauss(x, m, s, C, A)
-		return absorbtion - model
-
-	results = leastsq(fit_fn, coefs0, full_output=1)
-	m, s, C, A = results[0]
-	model = abs_gauss(x, m, s, C, A)
-	if results[-1] in [1,2,3,4]: success=True
-	else: success = False
-
-	if success and debug:
-		p.figure()
-		p.plot(x, absorbtion, marker='o', ls=None, label='data')
-		p.plot(x, model, ls='--', color='k', label='fit')
-		p.legend(loc=4)
-		p.show()
-	elif not success:
-		print 'Fitting failed', results[-2]
-	return m, s, C, A
-
-def find_line_sep(flux):
-	'''
-	Find the separation between two absorbtion
-	lines (in pixels) by fitting gaussians to each.
-	'''
-	# these are the pixel locations of the lines
-	p1,p2,p3,p4 = 1,1,1,1
-	m1, s1, C1, A1 = fit_absorbtion(flux, p1, p2)
-	m2, s2, C2, A2 = fit_absorbtion(flux, p3, p4)
-	separation = abs( (p1+m1) - (p3+m3) )
-	return separation
-
-def fit_exposures(visit_dir = '/net/glados2.science.uva.nl/api/jarcang1/GJ-1214b/'):
-    '''
-    Find the pixel offset that minimizes difference between exposures wl curves.
-    Use first exposure as a template.
-    '''
-    exposures = load_all_ima(visit_dir=visit_dir)
-    template = spectrum(exposures[0]) # spectrum curve of first exposure (template)
-
-    p.figure()
-    # plot shifts for each exposure
-    for exposure in exposures[1:]:
-
-        s = spectrum(exposure)
-
-        shift, var_shift, Infodict, mesg, ler = lsq_pix_shift(template, s)
-        print('Found optimal pixel shift of {} pixels'.format(shift[0]))
-
-        if ler in [1,2,3,4]:
-            colour = 'b'
-        else:
-            colour = 'r'
-        p.plot(exposure.Primary.header['EXPSTART'], shift,mfc=colour,mec=colour,ls='None',marker='o')
-
-    p.xlabel('Exposure time')
-    p.ylabel('Optimal pixel shift')
-    p.show()
-    p.close()
+    def func(x, shift):
+        return np.interp(x, x+shift, y)
+    out = curve_fit(func, template_x, template_y, p0=(0.))
+    shift = out[0][0]
+    err = np.diag(np.sqrt(out[1]))[0]
+    #assert success, 'Fitting failed'
+    return shift, err
 
 
-###########################################
-#          Systematic Corrections         #
-###########################################
-
-# This is a first guess at some parameters, just here for completeness
-coefs0 = [ 0.11, 0.28, 0.006, 2E9, -200, 0.003, 0.002]
+#######################
+#        Other        #
+#######################
 
 def custom_transit_params(system='GJ-1214', **kwargs):
     '''
@@ -895,6 +802,18 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.u = [0]                     #stellar limb darkening coefficients
         params.fp = 0                      #secondary eclipse depth, wave/temp dependent
         params.Hmag = 0.
+    elif system == 'WASP-12':
+        per = 	1.0914203
+        params.t0 = 	2456176.66826
+        params.t_secondary = params.t0 + per/2.
+        params.per = per                      #orbital period
+        params.rp = 1.9*cs.R_jup.value / (1.657*cs.R_sun.value)           # Rp/Rs, mean 0.0142
+        params.a = 0.0234*cs.au.value / (1.657*cs.R_sun.value)   #semi-major axis (a/Rs)
+        params.inc = 83.37                       #orbital inclination (in degrees)
+        params.ecc = 0.                   #eccentricity
+        params.w = 180.                     #longitude of periastron (in degrees)
+        params.limb_dark = "linear"           #limb darkening model
+        params.u = [0]                     #stellar limb darkening coefficient
     else: print 'WARNING unsupported system.'
     for key in kwargs:
     # Overwrite params or define custom system
@@ -905,13 +824,15 @@ def custom_transit_params(system='GJ-1214', **kwargs):
     return params
 
 def find_orbit_indexes(times, tol=None):
+    '''Find the indexes that seperate each orbit in a light curve'''
     time_differences = np.diff(times)
     if tol is None: tol = 0.01 #days or (max(times) - min(times)) / 10 hopefully unit independent tolerance
     changes = time_differences > tol
     indexes = [i+1 for i, change in enumerate(changes) if change]
     return indexes
 
-def unpack_orbits(array, indexes, discard=True):
+def unpack_orbits(array, indexes, discard=False):
+    '''Return individual orbit from light curve and indices'''
     list_array = np.split(array, indexes)
     if discard:
         list_array.pop(0) # chuck first orbit

@@ -4,15 +4,13 @@ import pyfits
 import my_fns as f
 import pylab as p
 import data
-from data import view_frame_image as view
+view = data.view_frame_image
 import logging
 import os
-reload(f)
-
 
 def twoD_products_simple(x, y, m):
+    ''' Effectively a binomial expansion?'''
     permute_arrays = [1]
-    
     for n in range(m)[1:]: # order-1
         for i in range(n+1):
             permute_arrays.append(x**(n-i)*y**i)
@@ -24,15 +22,14 @@ def field_dep_coeff(m, coeffs, x, y, permute_arrays=None):
     Input the order of the field function and the coefficients.
     x and y are the size of the field in the x and y directions
     '''
-    assert hasattr(coeffs, '__iter__'), 'Coeffs should be an iterable, even if it contains a single value'
-    assert m**2/2. + m/2. == len(coeffs), 'Incorrect number of coefficients for order {}'.format(m)
-    # permutations of x^i * y^n-i
-    if permute_arrays is None: permute_arrays = twoD_products_simple(x,y,m)
-
-    # find final sum
-    field_coeffs = 0
-    for arr, coeff in zip(permute_arrays, coeffs):
-        field_coeffs += arr*coeff
+    #assert hasattr(coeffs, '__iter__'), 'Coeffs should be an iterable, even if it contains a single value'
+    #assert m**2/2. + m/2. == len(coeffs), 'Incorrect number of coefficients for order {}'.format(m)
+    ic = 0
+    field_coeffs = coeffs[ic]
+    for n in range(m)[1:]: # order-1
+        for i in range(n+1):
+            ic += 1
+            field_coeffs += x**(n-i)*y**i * coeffs[ic]
     return field_coeffs
 
 def center_of_flux(filename, x, y, size):
@@ -43,8 +40,8 @@ def center_of_flux(filename, x, y, size):
     except AttributeError: image = exp.reads[0].SCI.data.copy()
     image = image[y-size:y+size, x-size:x+size]
     tot_flux = np.sum(image)
-    cof_x = np.sum([ row*i for i, row in enumerate(image.T)]) / tot_flux - size
-    cof_y = np.sum([ col*i for i, col in enumerate(image)]) / tot_flux - size
+    cof_x = np.sum([ row*i for i, row in enumerate(image.T) ]) / tot_flux - size
+    cof_y = np.sum([ col*i for i, col in enumerate(image) ]) / tot_flux - size
     return x+cof_x, y+cof_y
 
 def calc_poly_order(coeffs):
@@ -316,7 +313,7 @@ def interp_full_image2(scale, waves, image, mask):
 # Flat field correction #
 #########################
 
-def flat_field_correct(waves, fluxes, x0=0, x1=-1, ystart=0, yend=-1, flat_file = '/net/glados2.science.uva.nl/api/jarcang1/aXe/CONF/WFC3.IR.G141.flat.2.fits', wave_dep=True):
+def flat_field_correct(waves, fluxes, x0=0, x1=-1, ystart=0, yend=-1, flat_file='/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.flat.2.fits', wave_dep=True, ff_min=0.5):
     '''
     Find the pixel values after a wavelength dependant flat-field correction.
     Flat-field is defined by a polynomial whos coefficients are in the conf file:
@@ -330,7 +327,7 @@ def flat_field_correct(waves, fluxes, x0=0, x1=-1, ystart=0, yend=-1, flat_file 
     # need to extract the relevant subarray of the flat field image
     for HDU in FFHDU:
         ff_coeffs.append(HDU.data[ystart:yend,x0:x1])
-    assert ff_coeffs[0].shape == fluxes.shape, 'FF shape {}, image shape {}'.format(ff_coeffs[0].shape, fluxes.shape)
+    #assert ff_coeffs[0].shape == fluxes.shape, 'FF shape {}, image shape {}'.format(ff_coeffs[0].shape, fluxes.shape)
     # calculate normalized wavelengths
     if wave_dep: x = (waves - w_min)/(w_max - w_min)
     else: x = 1
@@ -342,10 +339,10 @@ def flat_field_correct(waves, fluxes, x0=0, x1=-1, ystart=0, yend=-1, flat_file 
         ff_error = ff_coeff*np.power(x,i)
         if not wave_dep: break # only do the wavelength indep part
     FFHDU.close()
+
+    tot_ff[tot_ff < ff_min] = 1.
+
     return np.divide(fluxes, tot_ff), tot_ff, ff_error
 
-#########################
-#       Tsiaras         #
-#########################
 
 

@@ -167,6 +167,7 @@ def initial_profile_estimate(D, S, f=None):
     D_S[D_S < 0] = 0 # to normalize P better
     if f is None:
         f = np.nansum(D_S,axis=0)
+    f[f==0] = 1
     return np.true_divide(D_S,f)
 
 # this dictionary contains all the functions that can be used to fit a spatial profile
@@ -195,6 +196,10 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
     '''
     full_debug = False # for excessive information
 
+    # If not signal, return fail
+    if np.mean(distn) < np.sqrt(np.mean(V_l)):
+        return False, 0.
+
     weights = np.ones_like(P_l)
     #weights[np.logical_or(np.isnan(weights), np.isinf(weights))]= 0
     weights[ outliers ] = 0 # ignore outlier pixels
@@ -212,7 +217,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
 
         results = UnivariateSpline(x=x,y=distn,w=weights, s=tol, k=order, check_finite=True)
 
-        if type(results) is None: logger.warning('Fitting has failed to produce a spline')
+        #if type(results) is None: logger.warning('Fitting has failed to produce a spline')
         fit = my_fns.spline(x, results)
         residual = results.get_residual()
         success = residual < tol*1.1
@@ -224,11 +229,11 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
             residual = results.get_residual()
             success = residual < tol*1.1
             if np.any(np.isnan(fit)):
-                logger.info('Fitting failed, NaN outputs... interrupted column {}.'.format(i))
+                #logger.info('Fitting failed, NaN outputs... interrupted column {}.'.format(i))
                 success = False
                 break
             elif j == 5 and not success:
-                logger.info('Over 100 iterations attempted... interrupted column {}.'.format(i))
+                #logger.info('Over 100 iterations attempted... interrupted column {}.'.format(i))
                 success = False
                 break
             j += 1
@@ -386,8 +391,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         p.figure() # get started
 
     if type(bg_array) != type(None):
-        if not np.any(bg_array == 0):
-            col_bg = np.median(bg_array, axis=0)
+        col_bg = np.median(bg_array, axis=0)
     else:
         col_bg = [None]*D.shape[1]
 
@@ -396,6 +400,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
     if func_type == 'gauss':
         coef0 = [np.mean(D), D.shape[0]/2, 2, 0]
 
+    fail_list = []
+    fail_type = []
     for i in range(D.shape[1]):
         # iterate along columns (wavelengths) of the IMAGE
 
@@ -459,22 +465,23 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     #print success
                 if not success:
                     if func_type != 'spline':
-                        logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
+                        #logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
+                        fail_list.append(i); fail_type('LINE')
                         P_l = np.ones_like(distn)
                     else:
                         try:
-                            logger.info('Optimal extraction fitting failed (col {}), using previous column fit'.format(i))
+                            # Optimal extraction fitting failed, using previous column fit
+                            fail_list.append(i)
                             results = old_results
                             success, coef = old_results
                             assert success and coef != None, 'Previous fits also failed'
                             P_l = my_fns.spline(x, coef)
-                            #p.plot(P_l, color='b')
-                            #p.plot(distn, marker='x',ls='None',color='g')
-                            #p.show()
+                            fail_type.append('PREVIOUS')
                         except (UnboundLocalError, AssertionError): # when this is the first column, use straight line
-                            logger.info('Optimal extraction fitting failed (col {}), using straight line'.format(i))
+                            #logger.info('Optimal extraction fitting failed (col {}), using straight line'.format(i))
                             resuls = (False, None)
                             P_l = np.ones_like(distn)
+                            fail_type.append('LINE')
                 else:
                     # this is the updated spatial fit at this wavelength
                     n_success += 1
@@ -613,13 +620,16 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         fV[i] = fV_l
     if n_success/float(n_fits) >= 0.9: logger.info('{} successes out of {} total fits'.format(n_success, n_fits))
     else: logger.warning('Warning: {} column fits failed out of {} total fits'.format(n_fits-n_success, n_fits))
+
+    logger.warning('Optimal extraction fitting failed for columns: {}'.format(fail_list))
+
     return P, V, f, fV
 
 
 '''
 Median filter take from:
 https://gist.github.com/bhawkins/3535131
-All credit to bhawkins.
+All credit to bhawkins, miss you brother.
 '''
 def medfilt (x, k):
     """Apply a length-k median filter to a 1D array x.
@@ -641,7 +651,7 @@ def medfilt (x, k):
 
 # RUN ALGORITHM #
 
-def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k=7, pdf_file=None, skip_fit=False, bg=None, logger=None):
+def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None, pdf_file=None, skip_fit=False, bg=None, logger=None):
     '''
     Extract spectrum using either a poly or gauss fit.
     Toggle cosmic ray removal by setting s_cosmic to None or
@@ -675,8 +685,9 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
         pdf = None
 
     # Interpolate over bad pixels
+    D[np.logical_not(np.isfinite(D))] = 0
+    V[np.logical_not(np.isfinite(V))] = 0
     origima = D.copy()
-    origima[np.logical_not(np.isfinite(origima))] = 0 # store original image
 
     if M_DQ is None:
         M_DQ = np.ones_like(D)
@@ -685,45 +696,45 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     else: M = np.logical_and(M_DQ, M_CR)
 
  
-    if M is not None:
-        # interpolate over bad pixels in D marked by M==0 along dispersion direction
-        mask = M.astype(bool) # False where bad
-        interp_spec = []
-        # for each row
-        for spec, spec_mask in zip(D, mask):
-            if not spec_mask.any():
-                # all bad
-                interp_spec.append(spec)
-            else:
-                ind = np.arange(len(spec))
-                t_ind = ind[spec_mask] # good indices
-                t_spec = spec[spec_mask]
-                # use an interpolation based on the good pixels
-                spec = np.interp(ind, t_ind, t_spec)
-                interp_spec.append(spec)
-        D = np.vstack(interp_spec)
+    if False:
+        if M is not None:
+            # interpolate over bad pixels in D marked by M==0 along dispersion direction
+            mask = M.astype(bool) # False where bad
+            interp_spec = []
+            # for each row
+            for spec, spec_mask in zip(D, mask):
+                if not spec_mask.any():
+                    # all bad
+                    interp_spec.append(spec)
+                else:
+                    ind = np.arange(len(spec))
+                    t_ind = ind[spec_mask] # good indices
+                    t_spec = spec[spec_mask]
+                    # use an interpolation based on the good pixels
+                    spec = np.interp(ind, t_ind, t_spec)
+                    interp_spec.append(spec)
+            D = np.vstack(interp_spec)
+        else:
+            M = np.ones_like(D)
     else:
-        M = np.ones_like(D)
+        D[np.logical_not(np.isfinite(D))] = 0
 
 
-    if not k is None and False:
-        # Now do a median smooth along each row
+    if not k_row is None:
+        # Do a median smooth along each row
         smooth_spec = []
         for row in D:
-            row = medfilt(row, k)
+            row = medfilt(row, k_row)
             smooth_spec.append(row)
-        view(D - np.vstack(smooth_spec))
         D = np.vstack(smooth_spec)
 
-    if not k is None and False:
-        # Now do a median smooth along each column
-        n_smoothloops = 2
-        for _ in range(n_smoothloops):
-            smooth_spec = []
-            for col in D.T:
-                col = medfilt(col, k)
-                smooth_spec.append(col)
-            D = np.vstack(smooth_spec).T
+    if not k_col is None:
+        # Do a median smooth along each column
+        smooth_spec = []
+        for col in D.T:
+            col = medfilt(col, k_col)
+            smooth_spec.append(col)
+        D = np.vstack(smooth_spec).T
 
     if type(S) in [int, float]:
         S = np.ones_like(D) * S
@@ -741,19 +752,8 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
 
     # find spatial profile and variance estimatesTrue
     # can not use M mask for this fit, have already smoothed and interpolated bad pixels
-    P, V, f, fV = FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima=origima, M=M_CR, pdf=pdf, bg_array=bg, M_DQ=M_DQ, M_CR=M_CR)
+    P, V, f, fV = FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima=origima, M=M, pdf=pdf, bg_array=bg, M_DQ=M_DQ, M_CR=M_CR)
     #V = estimate_variance(f=f, P=P, S=S, V_0=V_0, Q=Q)
-
-    # Smooth the splines
-    n_smooths = 5
-    if not k is None:
-        for i in range(n_smooths):
-            # Now do a median smooth along each row
-            smooth_spec = []
-            for row in P:
-                row = medfilt(row, k)
-                smooth_spec.append(row)
-            P = np.vstack(smooth_spec)
 
     n, loop = 0, True
     # D has been median smoothed so unlikely to find CR hits this way, do externally

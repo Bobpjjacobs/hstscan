@@ -1,10 +1,9 @@
 #provides all imports
 import my_fns as f
 from my_fns import pyfits, np, types, p, subprocess, os
-import reduction as r
-from data import *
+from scipy import integrate
 from my_errors import *
-import timecorr
+import timecorr, scipy
 
 def read_conf_file(fname):
     '''
@@ -54,8 +53,7 @@ def read_conf_file(fname):
 
 class Single_ima():
     '''
-    One exposure from the ima fits file.
-    Supports composition by addition and subtraction of pixel values.
+    One subexposure from the ima fits file.
     '''
     def __init__(self, SCI=pyfits.ImageHDU(0), ERR=pyfits.ImageHDU(0), DQ=pyfits.ImageHDU(0), SAMP=pyfits.ImageHDU(0), TIME=pyfits.ImageHDU(0), nobj=1):
 
@@ -196,7 +194,7 @@ class Single_ima():
 
 class Data_ima():
     '''``
-    Creates object containing all the reads from the ima file.
+    Creates object containing all the reads from the exposure _ima file.
     '''
 
     def __init__(self,filename,bjd=True):
@@ -259,18 +257,9 @@ class Single_red(Single_ima):
         self.mask = DQ.data.astype(bool)
         self.bg = SAMP.data
 
-    # no work :(
-    #@property
-    #def mask(self):
-    #    '''mask property, almost equivalent to DQ.data'''
-    #    return self.DQ.data.astype(bool)
-    #@mask.setter
-    #def mask(self, mask):
-    #    self.DQ.data = mask.astype(int)
-
 class Data_red(Data_ima):
 
-    def __init__(self,filename):
+    def __init__(self,filename,bjd=None):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -353,7 +342,7 @@ class Data_flt():
 class Data_drz():
     '''Break up a drz file into separate extensions and add methods'''
 
-    def __init__(self,filename):
+    def __init__(self,filename, bjd=None):
         self.filename = filename
         file_type = filename.split('_')
         if not file_type[-1] == 'drz.fits':
@@ -379,7 +368,7 @@ class Data_drz():
 
 
 def which_class(filename):
-    '''Return the appropriate Class with which to instance a file.'''
+    '''Return the appropriate Class with which to instantiate a file.'''
     class_dict = {'drz':Data_drz, 'flt':Data_flt, 'ima':Data_ima, 'red':Data_red}
     split_name = filename.split('_')
     if split_name[-1][:-5] in class_dict:
@@ -429,30 +418,6 @@ def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/h
     lines = [line[0] for line in lines if line[1].startswith('G')]
     for fname in lines:
         yield load(source_dir+fname+'_red.fits')
-
-def get_exp_info(source_file, data_dir, system):
-
-    source_dir = data_dir + system + '/'
-    # Find a suitable exposure to get details
-    with open(source_dir+source_file, 'r') as g:
-        for line in g:
-            if not line.startswith('#'):
-                line = line.split('\t')
-                if line[1].startswith('G'):
-                    fname = line[0]
-                    break
-                else: continue
-    if not fname.endswith('.fits'): fname += '_ima.fits'
-    fname = source_dir + fname
-    assert fname.endswith('_ima.fits'), 'Need _ima file for full info.'
-
-    exp = load(fname)
-    full_exp_time = exp.Primary.header['EXPTIME']
-    first_time = exp.reads[-2].SCI.header['SAMPTIME'] # integration time of first read
-    exp_time = ( full_exp_time - first_time ) /60./60/24 # integration time used
-    nreads = len(exp.reads) - 2 # zeroth read is blank, first is to flush
-    timecorr = first_time/2./60./60/24
-    return exp_time, nreads, timecorr
 
 def read_visit_names(source_file='input_image.lis', data_dir = '/net/glados2.science.uva.nl/api/jarcang1/GJ-1214/', append=''):
     '''
@@ -508,7 +473,11 @@ def read_spec(fname, wmin=-np.inf, wmax=np.inf):
     else:
         return zip(*lines)
 
-def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, plot=False, direction='a', all_plot=False, save_extension='_spec.txt', **kwargs):
+def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, plot=False, direction='a', all_plot=False, save_extension='_spec.txt', shift=False, peak=False, sane=None, shift_file=None, **kwargs):
+    
+    from dispersion import interp_sanity_quad
+    from reduction import spec_pix_shift
+
     with open(source_dir+files) as g:
         lines = g.readlines()
     lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
@@ -519,10 +488,15 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     times = [float(line[2]) for line in lines]
     directions = [line[3][0] for line in lines]
 
+    if shift_file:
+        with open(shift_file, 'r') as g:
+            sf_lines = g.readlines()
+        sf_rootnames, sf_shifts, sf_errs = zip(*[sf_line.split() for sf_line in sf_lines])
+        sf_shifts, sf_errs = np.array(sf_shifts).astype(float), np.array(sf_errs).astype(float)
+        file_shifts = dict(zip(sf_rootnames, sf_shifts))
+
     all_flux, all_waves, all_times, all_errors = [], [], [], []
     for rootname, time in zip(rootnames, times):
-        got = False
-        #print rootname,
         # look for the spec file
         for file_ in os.listdir(source_dir):
             if file_.endswith(save_extension) and file_.startswith(rootname) and not file_.endswith('_subs'+save_extension):
@@ -533,25 +507,33 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 all_waves.append(waves)
                 all_times.append(time)
                 all_errors.append(errors)
-                got = True
-                #print got
                 break
             else: 
                 pass
-        #if not got: print got
-
-    #print len(times), len(directions), len(rootnames)
-    #print '^', len(all_flux)
 
     # Interpolate to first spectrum in the visit/orbit
-    template_x, template_y = all_waves[-1], all_flux[-1]
-    #template_x, template_y = all_waves[-1], np.median(all_flux[-8:], axis=0)
+    #print [len(x) for x in all_waves]
+    #template_x, template_y = all_waves[-1], all_flux[-1]
+    template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
-    for waves, fluxes in zip(all_waves, all_flux):
-        shift = r.spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
-        shift_y = np.interp(template_x, template_x+shift, fluxes)
-        shift_err = np.interp(template_x, template_x+shift, errors)
+    for waves, fluxes, err, rootname in zip(all_waves, all_flux, all_errors, rootnames):
+        if not shift:
+            shift_y = np.interp(template_x, waves, fluxes)
+            shift_err = err; shift = 0
+        else:
+            # Correct shift between exposures
+            if shift_file:
+                shift = file_shifts[rootname]
+            else:
+                if not peak:
+                    #print len(template_x), len(template_y), len(waves), len(fluxes)
+                    shift, _ = spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
+                else:
+                    i0, i1 = np.argmin(abs(template_x-1.14)), np.argmin(abs(template_x-1.6))
+                    shift, _ = spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
+            shift_y = np.interp(template_x, template_x+shift, fluxes)
+            shift_err = np.interp(template_x, template_x+shift, err)
         interp_spectra.append(shift_y)
         interp_errors.append(shift_err)
         shifts.append(shift)
@@ -567,11 +549,52 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
             p.plot(template_x, spec)
         p.show()
 
+    # Find the amount of each pixel used, for error calculation and simple integral
+    in_bin = []
+    bin_sizes = np.hstack([np.diff(template_x), template_x[-1]-template_x[-2]])
+    wv_left = template_x - bin_sizes/2.; wv_right = template_x + bin_sizes/2.
+    for left, wv, right in zip(wv_left, template_x, wv_right):
+        
+        if left >= wmax:
+            # out
+            in_bin.append(0)
+        elif left >= wmin:
+            # left within new bin
+            if right <= wmax:
+                # Fully in
+                in_bin.append(1.)
+            else:
+                # right > wvmax, right edge
+                in_bin.append( (wmax-left) / (right-left))
+        elif right > wmin:
+            # left < wvmin, left edge
+            in_bin.append( (right-wmin) / (right-left))
+        else:
+            # Fully out
+            in_bin.append(0)
+    in_bin = np.array(in_bin)
 
-    broad_flux = [ np.sum([ fl for wv, fl in zip(template_x, fluxes) if wv > wmin and wv < wmax ]) for fluxes in interp_spectra ]
     broad_time = all_times
-    broad_errors = [ np.sqrt(np.sum([ err**2 for wv, err in zip(template_x, errors) if wv > wmin and wv < wmax ])) for errors in interp_errors ]
+    broad_flux = [ np.sum(fluxes*in_bin) for fluxes in interp_spectra ]
+    broad_errors = [ np.sqrt(np.sum((errors**2*in_bin))) for errors in interp_errors ]
 
+    '''
+    if wmin == -np.inf or wmax == np.inf:
+        broad_flux = [ np.sum([ fl for wv, fl in zip(template_x, fluxes) if wv > wmin and wv < wmax ]) for fluxes in interp_spectra ]
+        broad_errors = [ np.sqrt(np.sum([ err**2 for wv, err in zip(template_x, err) if wv > wmin and wv < wmax ])) for err in interp_errors ]
+    else:
+        broad_flux, broad_errors = [], []
+        for fluxes, errs in zip(interp_spectra, interp_errors):
+            
+            def fl_fn(wv): return np.interp(wv, template_x, fluxes)
+            area = integrate.quad(fl_fn, wmin, wmax)[0]
+  
+            # crude error estm
+            error = np.sqrt(np.sum((errs**2*in_bin)))
+
+            broad_flux.append(area)
+            broad_errors.append(error)
+    '''
     if plot:
         for t, fl, direction in zip(broad_time, broad_flux, directions):
             if direction == 'r':
@@ -580,7 +603,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 color = 'b'
             p.plot(t, fl, ls='None', marker='o', color=color, **kwargs)
         #p.show()
-    return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions)
+    return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions), np.array(shifts)
 
 def get_sub_times(files, source_dir):
 
@@ -621,6 +644,7 @@ def get_sub_times(files, source_dir):
     return sub_times
 
 def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, direction='a', save_extension='_spec.txt', **kwargs):
+    from reduction import spec_pix_shift
     with open(source_dir+files) as g:
         lines = g.readlines()
     lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
@@ -659,7 +683,7 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
     for waves, _fluxes, _errors in zip(all_waves, all_flux, all_errors):
         interp_spectra, interp_errors, shifts = [], [], []
         for fluxes, errors in zip(np.array(_fluxes).T,np.array(_errors).T):        
-            shift = f.spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
+            shift = spec_pix_shift(template_x, template_y, waves, fluxes, debug=False)
             shift_y = np.interp(template_x, template_x+shift, fluxes)
             shift_err = np.interp(template_x, template_x+shift, errors)
             interp_spectra.append(shift_y)
@@ -672,52 +696,6 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
     broad_errors = [ [ np.sqrt(np.sum(np.square([ e for w, e in zip(wvs, er) if w > wmin and w < wmax ]))) for er in errs ] for wvs, errs in zip(all_waves, all_interp_errors)]
 
     return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions)
-
-def create_lists(system='WASP-18', source_dir='/home/jacob/hst_data/'):
-    # update times for the visit lists
-    lines = []
-    for file in os.listdir(source_dir+system):
-        if file.endswith('_ima.fits'):
-            rootname = file.split('/')[-1].split('_')[0]
-            exp = load(source_dir+system+'/'+rootname)
-            assert exp.Primary.header['t_units'] == 'BJD_TT', 'Incorrect time units {}'.format(exp.Primary.header['t_units'])
-            time = str(exp.Primary.header['t'])
-            postarg2 = exp.Primary.header['POSTARG2']
-            if postarg2 > 0.: direction = 'reverse'
-            else: direction = 'forward'
-            filt = exp.Primary.header['FILTER']
-            line = '\t'.join([rootname, filt, time, direction])+'\n'
-            lines.append(line)
-            print rootname,
-    return lines
-    lines.sort()
-    f.silentremove(source_dir+system+'/files.lis')
-    with open(source_dir+system+'/files.lis', 'w') as g:
-        for line in lines:
-            g.write(line)
-
-def update_lists(system='WASP-18', source_dir='/home/jacob/hst_data/'):
-    # update times for the visit lists
-
-    for file in os.listdir(source_dir+system):
-        if file.endswith('.lis'):
-            with open(source_dir+system+'/'+file, 'r') as g:
-                lines = g.readlines()
-                lines = [ line for line in lines if not line.startswith('#') ]
-            # check that the lines are in the right format
-            if len(lines[0].split()) != 4: continue
-            new_lines = []
-            for line in lines:
-                rootname, filt, time, direction = line.split()
-                exp = load(source_dir+system+'/'+rootname)
-                assert exp.Primary.header['t_units'] == 'BJD_TT', 'Incorrect time units {}'.format(exp.Primary.header['t_units'])
-                time = str(exp.Primary.header['t'])
-                line = '\t'.join([rootname, filt, time, direction])+'\n'
-                new_lines.append(line)
-            f.silentremove(source_dir+system+'/'+file)
-            with open(source_dir+system+'/'+file, 'w') as g:
-                for line in new_lines:
-                    g.write(line)
 
 #################
 # Viewing tools #
@@ -744,7 +722,7 @@ def view_3d_image(image, xlabel='Spectral Pixel', ylabel='Spatial Pixel', zlabel
     x, y = np.arange(x_len), np.arange(y_len)
     Y = np.repeat(y,x_len).reshape(y_len,x_len).transpose()
     X = np.repeat(x,y_len).reshape(x_len, y_len)
-    ax.plot_surface(X, Y, Z, cmap=cmap,linewidth=0)
+    ax.plot_surface(X, Y, Z, cmap=cmap, linewidth=0)
     #ax.w_xaxis.gridlines.set_lw(0)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -1074,6 +1052,31 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
         if rootname in l_rootname:
             return cat, cat_rootname
 
+def find_reference_exp(rootname, data_dir='/home/jacob/hst_data/WASP-18/'):
+    '''
+    Find exposure taken directly after
+    direct image (calibration image)
+    To use a reference exposures
+    '''
+    cat_rootname = None
+    with open(data_dir+'input_image.lis','r') as g:
+        lines = g.readlines()
+    lines = [line for line in lines if not line.startswith('#') and not line.strip()=='']
+
+    store_next = False
+    for line in lines:
+        l_rootname, l_filter, l_expstart, l_scan = line.split('\t')
+        if store_next:
+            ref_rootname = l_rootname
+        if l_filter.startswith('F'):
+            # Direct image filter
+            cat = data_dir + l_rootname + '_flt_1.cat'
+            cat_rootname = l_rootname
+            store_next = True
+        else:
+            store_next = False
+        if rootname in l_rootname:
+            return ref_rootname
 
 #####################################
 ## Tools for reading emcee results ##
@@ -1201,6 +1204,28 @@ def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'
 #                    misc                  #
 ############################################
 
+# Data quality file flags and descriptions
+dq_info = {
+            0:      ('GOODPIXEL',       'OK'),
+            1:      ('SOFTERR',         'Reed-Solomon decoding error'),
+            2:      ('DATALOST',        'data replaced by fill value'),
+            4:      ('DETECTORPROB',    'bad detector pixel'),
+            8:      ('BADZERO',         'unstable IR zero-read pixel'),
+            16:     ('HOTPIX',          'hot pixel'),
+            32:     ('UNSTABLE',        'IR unstable pixel'),
+            64:     ('WARMPIX',         'unused'),
+            128:    ('BADBIAS',         'bad reference pixel value'),
+            256:    ('SATPIXEL',        'full-well or a-to-d saturated pixel'),
+            512:    ('BADFLAT',         'bad flat-field value'),
+            1024:   ('SPIKE',           'CR spike detected during ramp fitting'),
+            2048:   ('ZEROSIG',         'IR zero-read signal correction'),
+            4096:   ('TBD',             'cosmic ray detected by Astrodrizzle'),
+            8192:   ('DATAREJECT',      'rejected during up-the-ramp fitting'),
+            16384:  ('HIGH_CURVATURE',  'not used'),
+            32768:  ('RESERVED2',       'cant use')
+            }
+
+# Used below
 #FILTER, dx, dxerr, dy, dyerr, shift, shifterr 
 filt_data = [['F098M', 0.150, 0.026, 0.268, 0.030, 0.309, 0.034], 
              ['F140W', 0.083, 0.020, 0.077, 0.022, 0.113, 0.030], 
