@@ -4,6 +4,7 @@
 .ipynb_checkpoints/*
 
 test/*
+data/*
 
 *.pdf
 *.png
