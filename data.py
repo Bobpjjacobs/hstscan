@@ -29,7 +29,7 @@ def read_conf_file(fname):
                     val = False
                 elif key in ['n_masks','cr_tol','s','v_0','q','s_clip','s_cosmic','fit_tol']:
                     val = float(val)
-                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width']:
+                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width', 'drift_width']:
                     val = int(val)
                 elif key == 'dq_flags':
                     # 4: Bad detector pixel, 32: Unstable photometric response, 256: Saturated, 512: Bad flat field

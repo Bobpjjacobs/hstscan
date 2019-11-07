@@ -125,14 +125,20 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     y = np.repeat(y,x_len).reshape(y_len,x_len)
     # Scale to ref pixel (inc. offsets)
     X = x - XREF # x wrt to (0,0), X wrt to (XREF,YREF)
-    Y0 = y - YREF
+    Y = np.zeros_like(y)
+    # All broken below, simplified with just y=0
+    '''
+    Y0 = y - YREF # Scan start
+    view(Y0)
     # This is if the direct image didnt move, but it does, so account for it:
     BEAM_H = exp_time*scan_rate/pix_size*scan_direction # Height of beam w.r.t. to 0th direct image
-    Y1 = y - YREF - BEAM_H
+    Y1 = y - YREF - BEAM_H # Scan end
     YM = np.zeros_like(Y0)
-    if scan_direction>0: Y = np.vstack([ Y0[:int(YREF)], YM[int(YREF):int(YREF+BEAM_H)], Y1[int(YREF+BEAM_H):] ])
-    elif scan_direction<0: Y = np.vstack([ Y1[:int(YREF+BEAM_H)], YM[int(YREF+BEAM_H):int(YREF)], Y0[int(YREF):] ])
-
+    if scan_direction>0: 
+        Y = np.vstack([ Y0[:int(YREF)], YM[int(YREF):int(YREF+BEAM_H)], Y1[int(YREF+BEAM_H):] ])
+    elif scan_direction<0: 
+        Y = np.vstack([ Y1[:int(YREF+BEAM_H)], YM[int(YREF+BEAM_H):int(YREF)], Y0[int(YREF):] ])
+    '''
 
     # Evaluate polynomial
     def function(x_trace, x, y, ALL_COEFFS, plot_coeffs=False, debug=False):

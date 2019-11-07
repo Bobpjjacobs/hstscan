@@ -15,6 +15,9 @@ import dispersion as disp
 import pyfits
 view = data.view_frame_image
 
+reload(data)
+reload(cal)
+
 def add_handlers(logger, log_file, warnings_file, level):
         '''
         Set up logging file to include handlers for info and warnings.
@@ -157,9 +160,11 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
             dispersion (bool): perform wavelength calculation and corrections
             XOFF_file (str): file containing x-shifts between exposures (pre-calculated)
             exp_shift (bool): use exposure shifts during wavelength calibration
+            exp_drift (bool): correct for in-exposure drift using interpolation
             flat_field (bool): whether to perform flat_field correction, wavelength dep if dispersion==True
             ff_min (float): minimum value for flat-field, values below this are set to 1
             nysig (int): number of spectrum gaussian widths to calculate wavelength for on image
+            tsiaras (bool): use wavlength dependent photon trajectory method (Tsiaras+18)
             grid_y, grid_lam (ints): wavelength dependent photon trajectory grid resolution  
             interp_kind (str): type of interpolation if using basic method (linear, quadratic...)
             flat_file_g141 (str): config file for flat-field
@@ -181,7 +186,8 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 'cr_x': 5, 'cr_y': 5, 'cr_thresh': 50.,
                 'cr_master': False, 'cr_mname': None, 
                 'dispersion': True, 'exp_shift':True, 'ref_exp': None, 'ref_wv0':0.9, 'ref_wv1':1.92, 
-                'pre_shift_ff':False, 'peak': False, 'xshift_ext':0.,
+                'pre_shift_ff':False, 'tsiaras':True, 'peak': False, 'xshift_ext':0., 'exp_drift':False, 
+                'drift_width':4, 'drift_rowtol': 1.1,
                 'flat_field': True, 'ff_min':0.5,
                 'nysig':5, 'grid_y':20, 'grid_lam':20, 'two_scans':False, 'interp_kind':'linear',
                 'flat_file_g141':'None', 'conf_file_g141':'None', 
@@ -558,19 +564,28 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 if y0 + width0/2. > subexposure.SCI.data.shape[1]: y0 = subexposure.SCI.data.shape[1]-width0/2.
                 elif y0 - width0/2. < 0: y0 = width0/2.
                 # Fit for y scan height and position given guess
-                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=False)
+                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=True)
 
                 subexposure.xpix = xpix
                 subexposure.ystart = ystart; subexposure.yend = yend
                 subexposure.ypix = (subexposure.ystart+subexposure.yend)/2.
 
                 # Calculate wavelength solution
-                subexposure.wave_grid = disp.dispersion_solution(x0=xpix, L=image.shape[0], Dxoff=XOFF, Dxref=Dxref, ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS, TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y, wdpt_grid_lam=t.grid_lam)
-                
-                # Define wavelength grid to interpolate to
-                # 0.9-1.92, 200
-                wave_ref = np.linspace(t.ref_wv0, t.ref_wv1, 200) #subexposure.wave_grid[0] 
-                # interpolate all rows to this row   
+                if t.tsiaras:
+                    subexposure.wave_grid = disp.dispersion_solution(x0=xpix, L=image.shape[0], Dxoff=XOFF, Dxref=Dxref, ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS, TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y, wdpt_grid_lam=t.grid_lam)
+                    
+                    # Define wavelength grid to interpolate to
+                    # 0.9-1.92, 200
+                    wave_ref = np.linspace(t.ref_wv0, t.ref_wv1, 200) #subexposure.wave_grid[0] 
+                    # interpolate all rows to this row
+                else:
+                    # Regular wavelength correction
+                    assert t.exp_drift, 'Must re-interpolate image if not correcting for wavelength dependent photon trajectories'
+                    L = subexposure.SCI.data.shape[0]
+                    subexp_time = subexposure.SCI.header['SAMPTIME']
+                    wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate, scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF, data_dir=t.source_dir, debug=False, x=subexposure.xpix, y=subexposure.ypix)
+                    subexposure.wave_grid = wave_grid[ystart:yend,int(xpix):int(xpix)+200]
+                    wave_ref = subexposure.wave_grid[0]
          
                 subexposure.waves = wave_ref
                 cut_image = image[ystart:yend,int(xpix):int(xpix)+200].copy() # cutout of spectral area
@@ -599,8 +614,11 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 cut_mask = subexposure.mask[ystart:yend,int(xpix):int(xpix)+200]
                 subexposure.cut_mask = cut_mask.copy()
                 # New interpolation, area under pixel matches pixel flux
-                interp_image, interp_mask = disp.interp_wave_grid_sane(subexposure.waves, subexposure.wave_grid,
-                                                 cut_image, cut_mask, tol=t.contam_thresh)
+                if t.tsiaras:
+                    interp_image, interp_mask = disp.interp_wave_grid_sane(subexposure.waves, subexposure.wave_grid,
+                                                     cut_image, cut_mask, tol=t.contam_thresh)
+                else:
+                    interp_image, interp_mask = cut_image, cut_mask
                 subexposure.interp_image = interp_image                
                 subexposure.interp_mask = interp_mask
 
@@ -775,6 +793,57 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
         all_CRs = np.sum(CR_masks, axis=0)
         view(all_CRs, title='Distribution of CRs over exposure', cbar=False, show=False, vmin=0, vmax=1, cmap='binary_r')
         save_fig()
+
+    # Check for position drift within an exposure and correct
+    if t.exp_drift:
+        tot_image = np.sum([sub.SCI.data for sub in subexposures], axis=0)
+        tot_image = tot_image[:, int(xpix):int(xpix)+200]
+        ref_row = np.mean(tot_image, axis=0)
+        x_row = np.arange(len(ref_row))
+        shs, ers = [], []
+        for row in tot_image:
+            sh, er = r.spec_pix_shift(x_row, ref_row, x_row, row)
+            if np.max(row) < np.max(tot_image)/t.drift_rowtol: sh, er = 0, 0
+            shs.append(sh); ers.append(er)
+        shs, ers = map(np.array, [shs, ers])
+        h0 = np.sum(shs[len(shs)/2]==0)
+        h1 = np.sum(shs[len(shs)/2:]==0)
+        
+        sh_stack = []
+        for i in range(-t.drift_width, t.drift_width+1):
+            sh_rol = np.roll(shs[h0:-h1], i)
+            if i > 0:
+                sh_rol[:i] = sh_rol[i+1]
+            if i < 0:
+                sh_rol[i:] = sh_rol[i-1]
+            sh_stack.append(sh_rol)
+        m_stack, s_stack = np.mean(sh_stack, axis=0), np.std(sh_stack, axis=0)
+
+        corr_shs = shs.copy()
+        corr_shs[h0:-h1] = m_stack
+
+        if t.debug:
+            p.subplot(1,2,1)
+            p.title('Reference spectrum for shift')
+            p.plot(x_row, ref_row)
+            p.subplot(1,2,2)
+            view(tot_image, show=False, cbar=False)
+            save_fig()
+            p.title('Smoothing length {}'.format(t.drift_width))
+            p.plot(corr_shs, np.arange(len(tot_image)), marker='o', ls='--')
+            p.gca().set_autoscale_on(False)
+            p.plot(shs, np.arange(len(tot_image)), marker='o', ls='--', alpha=0.1, zorder=-10)
+            #p.xlim(-1,1)
+            save_fig()
+        
+        for i in range(len(subexposures)):
+            image = subexposures[i].SCI.data
+            x = np.arange(image.shape[1])
+            new_image = []
+            for row, sh in zip(image, corr_shs):
+                new_row = np.interp(x-sh, x, row)
+                new_image.append(new_row)
+            subexposures[i].SCI.data = np.array(new_image)
 
     exposure.subexposures = subexposures
 
@@ -1011,6 +1080,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         Ps.append(P)
         # Optimal Extraction
         # Sum spatial
+        print(len(subexposure.waves), len(spec))
         spectrum = f.Spectrum(subexposure.waves,spec,x_unit='Wavelength (microns)', y_unit='electrons')
         spectra.append(spectrum)
         variances.append(specV)
