@@ -1,0 +1,13 @@
+# 1  NUMBER  Running object number
+# 2  X_IMAGE  Object position along x  [pixel]
+# 3  Y_IMAGE  Object position along y  [pixel]
+# 4  X_WORLD  Barycenter position along world x axis  [deg]
+# 5  Y_WORLD  Barycenter position along world y axis  [deg]
+# 6  A_IMAGE  Profile RMS along major axis  [pixel]
+# 7  B_IMAGE  Profile RMS along minor axis  [pixel]
+# 8  THETA_IMAGE  Position angle (CCW/x)  [deg]
+# 9  A_WORLD  Profile RMS along major axis (world units)  [deg]
+# 10 B_WORLD  Profile RMS along minor axis (world units)  [deg]
+# 11 THETA_WORLD  Position angle (CCW/world-x)  [deg]
+# 12 MAG_F1384  Kron-like elliptical aperture magnitude  [mag]
+1	145.02702211500713	129.2059149025231	0	0	1.0823449254351067	1.1070740041759835	0.0	0	0	0	0.0
