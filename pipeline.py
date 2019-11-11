@@ -1,7 +1,7 @@
 from __future__ import print_function
 import reduction as r
 import my_fns as f
-import data, systematics
+import data
 import extraction_algorithm as ea
 import calibration as cal
 from my_fns import np, p, os
@@ -466,7 +466,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                         ref_mask = np.sum([sub.mask for sub in ref_exp.subexposures], axis=0).astype(bool)
                         ref_image = np.nansum([sub.SCI.data for sub in ref_exp.subexposures], axis=0)
 
-                        if t.pre_shift_ff: #not working
+                        if t.pre_shift_ff and False: #not working
                             # Apply flat-field correction before shift calculation
                             L = subexposure.SCI.data.shape[0]
                             dL = (1014-L)/2
@@ -564,7 +564,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 if y0 + width0/2. > subexposure.SCI.data.shape[1]: y0 = subexposure.SCI.data.shape[1]-width0/2.
                 elif y0 - width0/2. < 0: y0 = width0/2.
                 # Fit for y scan height and position given guess
-                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=True)
+                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=False)
 
                 subexposure.xpix = xpix
                 subexposure.ystart = ystart; subexposure.yend = yend
@@ -580,18 +580,15 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                     # interpolate all rows to this row
                 else:
                     # Regular wavelength correction
-                    assert t.exp_drift, 'Must re-interpolate image if not correcting for wavelength dependent photon trajectories'
+                    if t.scanned: assert t.exp_drift, 'Must re-interpolate image if not correcting for wavelength dependent photon trajectories'
                     L = subexposure.SCI.data.shape[0]
                     subexp_time = subexposure.SCI.header['SAMPTIME']
                     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate, scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF, data_dir=t.source_dir, debug=False, x=subexposure.xpix, y=subexposure.ypix)
-                    subexposure.wave_grid = wave_grid[ystart:yend,int(xpix):int(xpix)+200]
+                    subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend,int(xpix):int(xpix)+200]
                     wave_ref = subexposure.wave_grid[0]
          
                 subexposure.waves = wave_ref
                 cut_image = image[ystart:yend,int(xpix):int(xpix)+200].copy() # cutout of spectral area
-                if subexposure.SCI.data.shape[1] < xpix + 200:
-                    subexposure.waves = subexposure.waves[:cut_image.shape[1]-200]
-                    subexposure.wave_grid = subexposure.wave_grid[:,:cut_image.shape[1]-200]
 
                 # Flat field correction (requres wavelength solution for more than 0th order)
                 # Need to do before interpolating to a reference row
@@ -604,6 +601,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                         x1 = int(xpix)+200
                     L = subexposure.SCI.data.shape[0]
                     dL = (1014-L)/2
+                    print(t.flat_file_g141)
                     cut_image, ff, ff_error = cal.flat_field_correct( _waves, cut_image,
                                                     int(xpix)+dL, x1+dL, subexposure.ystart+dL, subexposure.yend+dL,
                                                     t.flat_file_g141, ff_min=t.ff_min)

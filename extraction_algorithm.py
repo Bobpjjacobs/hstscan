@@ -1,7 +1,6 @@
 #from __future__ import print_function
 # Imports of basic functions and packages
 import my_fns
-import my_errors as err
 from scipy import optimize
 from scipy.interpolate import UnivariateSpline, InterpolatedUnivariateSpline
 from my_fns import np, p

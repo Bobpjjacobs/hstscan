@@ -2,7 +2,6 @@
 import my_fns as f
 from my_fns import pyfits, np, types, p, subprocess, os
 from scipy import integrate
-from my_errors import *
 import timecorr, scipy
 
 def read_conf_file(fname):
@@ -124,7 +123,7 @@ class Single_ima():
             try:
                 self.SCI.data[self.mask] = replace
             except AttributeError:
-                raise_wtih_traceback(InputError('The file has no DQ data or mask.'))
+                raise 'The file has no DQ data or mask.'
 
         mask = np.sum([ self.DQ.data/flag % 2 == 1 for flag in int_flags ], axis=0).astype(bool)
 
