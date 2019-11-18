@@ -921,7 +921,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                 'ignore_blobs': False, 'blob_thresh':0.7, 
                 'shift_spectra': False, 'shift_wv0':1.14, 'shift_wv1':1.6, 'peak':False,
                 'opt_ext': True, 's': 0, 'v_0': 20**2, 'q': 1, 's_clip': None, 's_cosmic': None, 'func_type': 'spline',
-                'method': 'lsq', 'fit_tol':0.01, 'save_dir':None, 
+                'method': 'lsq', 'fit_tol':0.01,
                 'step': None, 'order': 2, 'skip_fit': False, 'remove_bg': True, 'top_half':False,
                 'k_col': 9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                 }
