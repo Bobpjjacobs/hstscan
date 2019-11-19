@@ -513,7 +513,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     # Interpolate to first spectrum in the visit/orbit
     #print [len(x) for x in all_waves]
     #template_x, template_y = all_waves[-1], all_flux[-1]
-    template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)
+    template_x, template_y = all_waves[-1], np.median(all_flux[:18], axis=0)
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
     for waves, fluxes, err, rootname in zip(all_waves, all_flux, all_errors, rootnames):

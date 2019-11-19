@@ -5,6 +5,7 @@
 
 test/*
 data/*
+reduce_*.py
 
 *.pdf
 *.png

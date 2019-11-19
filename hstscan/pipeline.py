@@ -410,6 +410,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
             if not os.path.isfile(catalogue):
                 catalogue_split[-3] = catalogue_split[-3][:-3]+'010'
                 catalogue = '_'.join(catalogue_split)
+            logger.warning('Replaced catalogue with {}'.format(catalogue))
         try:
             direct_image = data.Data_ima(t.source_dir+di_name+'_ima.fits', bjd=False)
             logger.warning('Catalogue file: {}'.format(di_name+'_ima.fits'))
