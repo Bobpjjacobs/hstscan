@@ -12,7 +12,7 @@ from scipy.optimize import leastsq, curve_fit
 from matplotlib.backends.backend_pdf import PdfPages
 
 import dispersion as disp
-import pyfits
+import astropy.io.fits as pyfits
 view = data.view_frame_image
 
 reload(data)
@@ -171,7 +171,6 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
             conf_file_g141 (str): config file for dispersion 
             contam_thresh: contamination threshold of bad pixels for interpolation
     '''
-
     t0 = time.time() # time reduction run
 
     # Store all the possible external configs in a dict 't', default values defined in 'toggles'
@@ -203,7 +202,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
 
     # Open up an exposure if you input a filename
     if type(exposure) == str:
-        exposure = data.load(t.source_dir+exposure, bjd=False)
+        exposure = data.load(t.source_dir+exposure, conf_file=conf_file, bjd=False)
 
     # Set up logging for errors and info
     if t.logger:
@@ -382,7 +381,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
     # Calculate dispersion solution
     if t.dispersion:
         # First get relevant config values
-        DISP_COEFFS, TRACE_COEFFS = disp.get_conf_coeffs()
+        DISP_COEFFS, TRACE_COEFFS = disp.get_conf_coeffs(WFC_conf_file = conf_kwargs['conf_file_g141'])
         POSTARG1, POSTARG2, PA_V3 = exposure.Primary.header['POSTARG1'], exposure.Primary.header['POSTARG2'], exposure.Primary.header['PA_V3']
         # Find scan direction from positional offset
         if POSTARG2 >= 0.: scan_direction = +1; logger.info('Forward scan')
@@ -411,10 +410,10 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 catalogue_split[-3] = catalogue_split[-3][:-3]+'010'
                 catalogue = '_'.join(catalogue_split)
         try:
-            direct_image = data.Data_ima(t.source_dir+di_name+'_ima.fits', bjd=False)
+            direct_image = data.Data_ima(t.source_dir+di_name+'_ima.fits', conf_file, bjd=False)
             logger.warning('Catalogue file: {}'.format(di_name+'_ima.fits'))
         except IOError: # no _ima for _drz files of multiple direct images
-            direct_image = data.Data_ima(t.source_dir+di_name+'_drz.fits', bjd=False)
+            direct_image = data.Data_ima(t.source_dir+di_name+'_drz.fits', conf_file, bjd=False)
             logger.warning('No catalogue file found for {}'.format(di_name+'_drz.fits'))
         di_size = direct_image.reads[0].SCI.shape[0] 
         di_image = direct_image.reads[0].SCI.data
@@ -564,15 +563,17 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 if y0 + width0/2. > subexposure.SCI.data.shape[1]: y0 = subexposure.SCI.data.shape[1]-width0/2.
                 elif y0 - width0/2. < 0: y0 = width0/2.
                 # Fit for y scan height and position given guess
-                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=False)
+                print("here's me debugging")
+                ystart, ymid, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=True)
 
                 subexposure.xpix = xpix
-                subexposure.ystart = ystart; subexposure.yend = yend
-                subexposure.ypix = (subexposure.ystart+subexposure.yend)/2.
+                subexposure.ystart = ystart; subexposure.yend = yend; subexposure.ypix = ymid
+                #subexposure.ypix = (subexposure.ystart+subexposure.yend)/2.
+                print("###################", subexposure.ypix, subexposure.ystart, subexposure.yend)
 
                 # Calculate wavelength solution
                 if t.tsiaras:
-                    subexposure.wave_grid = disp.dispersion_solution(x0=xpix, L=image.shape[0], Dxoff=XOFF, Dxref=Dxref, ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS, TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y, wdpt_grid_lam=t.grid_lam)
+                    subexposure.wave_grid = disp.dispersion_solution(x0=xpix, L=image.shape[0], Dxoff=XOFF, Dxref=Dxref, ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS, TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y, wdpt_grid_lam=t.grid_lam, WFC_conf_file = conf_file['CONF_FILE_G141'])
                     
                     # Define wavelength grid to interpolate to
                     # 0.9-1.92, 200
@@ -1239,6 +1240,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         with open(fname, 'w') as txtf:
             # this assumes you did wavelength calibration
             txtf.write('wave\tflux\terror\n')
+            txtf.write('Start-time: {} \n'.format(reduced_exposure.Primary.header['t'])) 
             txtf.write(text)
 
         if t.save_sub:
@@ -1278,7 +1280,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
 
     return exp_spectrum, variance, interp_spectra, variances
 
-def create_orbit_cats_gauss(data_dir='/home/jacob/hst_data/GJ-1214/', gridsize=5, use_ima=False, nstars=2):
+def create_orbit_cats_gauss(data_dir='/home/jacob/hst_data/GJ-1214/', conf_file='/home/jacob/Project_1/js41_hst.vec', gridsize=5, use_ima=False, nstars=2):
     '''
     Fit a gaussian to direct image to create visit catalogue.
     Use same format as SExtractor for catalogue files.
@@ -1301,7 +1303,7 @@ def create_orbit_cats_gauss(data_dir='/home/jacob/hst_data/GJ-1214/', gridsize=5
             print('Writing to: {}'.format(dest_file))
             if not use_ima: 
                 flt_fname  = data_dir + fname.split('_')[0]+'_drz.fits'
-                di = data.load(flt_fname)
+                di = data.load(flt_fname, conf_file)
                 full_images = [di.SCI.data.copy()]
                 full_image = full_images[0]
             else:

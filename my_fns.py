@@ -2,7 +2,7 @@ from __future__ import division
 #from future.utils import raise_with_traceback
 #from future.utils import bind_method
 import os
-import pyfits
+import astropy.io.fits as pyfits
 import subprocess
 import numpy as np
 from scipy import optimize
@@ -252,7 +252,7 @@ class Spectrum():
     Basic spectrum object.
     Calling the spectrum at a given x gives you a y by linear interpolation.
     '''
-    def __init__(self, x, y, x_unit=None, y_unit=None, name=None):
+    def __init__(self, x, y, x_unit=None, y_unit=None, fname=None):
         #should include a zip sort
         if len(x) != len(y):
             raise InputError('Input data should be of the same length')
@@ -260,7 +260,7 @@ class Spectrum():
         self.y = np.array(y)
         self.x_unit = x_unit
         self.y_unit = y_unit
-        self.name = name
+        self.fname = fname
 
     def __call__(self,x):
         '''
@@ -319,8 +319,8 @@ class Spectrum():
             p.xlabel(str(self.x_unit))
         if self.y_unit:
             p.ylabel(str(self.y_unit))
-        if self.name:
-            p.title(str(self.name))
+        if self.fname:
+            p.title(str(self.fname))
         if show:
             p.show()
             p.close()

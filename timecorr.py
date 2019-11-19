@@ -302,7 +302,7 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
 
 
 
-def jdutc2jdtdb(jd_utc, source_dir='/home/jacob/hstscan/src/'):
+def jdutc2jdtdb(jd_utc, source_dir='src/'):
 
     taifile = source_dir+'tai-utc.dat'
 

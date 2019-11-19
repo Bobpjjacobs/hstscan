@@ -1,6 +1,6 @@
 import numpy as np
 from itertools import combinations_with_replacement as P_iter
-import pyfits
+import astropy.io.fits as pyfits
 import my_fns as f
 import pylab as p
 import data

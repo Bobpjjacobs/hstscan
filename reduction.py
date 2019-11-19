@@ -8,7 +8,7 @@ from scipy.optimize import leastsq
 view = data.view_frame_image
 from matplotlib.backends.backend_pdf import PdfPages
 import astropy.constants as cs
-import pyfits
+import astropy.io.fits as pyfits
 
 # Analysis of data
 

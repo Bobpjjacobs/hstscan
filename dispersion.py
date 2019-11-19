@@ -4,14 +4,14 @@ from scipy.optimize import leastsq, curve_fit
 from scipy.interpolate import interp1d
 import calibration as cal
 
-def get_conf_coeffs(conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
+def get_conf_coeffs(WFC_conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
     '''
     Read configuration file for G141
     Defines trace position and wavelengths along trace, using field-dependent coefficients
     See aXe manual for details
     '''
     n = 'A'
-    with open(conf_file) as cf:
+    with open(WFC_conf_file) as cf:
         lines = cf.readlines()
         lines = [line[:-1] for line in lines if line[0] != '#']
     DISP_COEFFS, TRACE_COEFFS = [], []
@@ -48,13 +48,13 @@ def get_fielddep_coeffs(xs, ys, COEFFS, ms=None, permute_arrays=[None]*2):
 
 def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend, 
                         wvmin=1., wvmax=1.8, DISP_COEFFS=None, TRACE_COEFFS=None, wdpt_grid_y=20, wdpt_grid_lam=20,
-                        conf_file='/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
+                        WFC_conf_file='/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
 
     x1s = x0 + Dxoff + Dxref + (512-0.5*L) # relative to full array
     yss = np.linspace(ystart,yend,wdpt_grid_y) + 512-0.5*L # let y vary along scan
     lams = np.linspace(wvmin,wvmax,wdpt_grid_lam)*1e4 # in angstrom
 
-    if not DISP_COEFFS or not TRACE_COEFFS: DISP_COEFFS, TRACE_COEFFS = get_conf_coeffs(conf_file)
+    if not DISP_COEFFS or not TRACE_COEFFS: DISP_COEFFS, TRACE_COEFFS = get_conf_coeffs(WFC_conf_file)
     # Pre-compute some steps for speed since need to do this at all gridpoints
     ms = map(cal.calc_poly_order, [TRACE_COEFFS[1], TRACE_COEFFS[0],DISP_COEFFS[1],DISP_COEFFS[0]])
 
@@ -391,12 +391,12 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
             scale, mu, sig = scale1, mu1, abs(sig1)
         else:
             scale, mu, sig = scale2, mu2, abs(sig2)
-        ystart, yend = int(mu-nsig*sig), int(mu+nsig*sig)     
+        ystart, ymid, yend = int(mu-nsig*sig), mu, int(mu+nsig*sig)     
     else: 
         scale, mu, sig, width = out[0]
         sig = abs(sig) # apparently nescessary
         if width <0.: width = 0
-        ystart, yend = int(mu-2*width-nsig*sig), int(mu+2*width+nsig*sig)
+        ystart, ymid, yend = int(mu-2*width-nsig*sig), mu, int(mu+2*width+nsig*sig)
     # Sanity corrections
     if ystart < 0: ystart = 0
     if yend >= len(row_sum): yend = len(row_sum)-1    
@@ -416,4 +416,4 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p.legend()
         p.show()
     
-    return ystart, yend
+    return ystart, ymid, yend
