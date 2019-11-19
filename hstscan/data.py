@@ -217,7 +217,7 @@ class Data_ima():
             # Now do the timing corrections
             if bjd:
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), './src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '../src/js41_hst.vec')
 
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
@@ -531,8 +531,8 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 else:
                     i0, i1 = np.argmin(abs(template_x-1.14)), np.argmin(abs(template_x-1.6))
                     shift, _ = spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
-            shift_y = np.interp(template_x, template_x+shift, fluxes)
-            shift_err = np.interp(template_x, template_x+shift, err)
+            shift_y = np.interp(template_x, template_x-shift, fluxes)
+            shift_err = np.interp(template_x, template_x-shift, err)
         interp_spectra.append(shift_y)
         interp_errors.append(shift_err)
         shifts.append(shift)
