@@ -598,7 +598,7 @@ def find_box(source_image, h=40, sign='p', refine=False):
 
 from scipy.optimize import curve_fit
 
-def spec_pix_shift(template_x, template_y, x, y, norm=True, interp_template=True):
+def spec_pix_shift(template_x, template_y, x, y, norm=True, interp_template=True, p0=0.01, **kwargs):
     '''
     Calculate optimal shift in wavelength by cross-correlation.
     Input template_x and x assumed to be in microns
@@ -616,7 +616,7 @@ def spec_pix_shift(template_x, template_y, x, y, norm=True, interp_template=True
 
     def func(x, shift):
         return np.interp(x, x+shift, interp_y)
-    out = curve_fit(func, template_x, ref_y, p0=(0.))
+    out = curve_fit(func, template_x, ref_y, p0=(p0), **kwargs)
     shift = out[0][0]
     err = np.diag(np.sqrt(out[1]))[0]
     #assert success, 'Fitting failed'
