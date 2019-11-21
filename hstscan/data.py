@@ -302,7 +302,7 @@ class Data_flt():
             if bjd:
                 # Now do the timing corrections
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), './src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '../src/js41_hst.vec')
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
@@ -475,8 +475,9 @@ def read_spec(fname, wmin=-np.inf, wmax=np.inf):
 def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, plot=False, direction='a', all_plot=False, save_extension='_spec.txt', shift=False, peak=False, sane=None, shift_file=None, **kwargs):
     
     from dispersion import interp_sanity_quad
-    from reduction import spec_pix_shift
-
+    import reduction as r
+    reload(r)
+    
     with open(source_dir+files) as g:
         lines = g.readlines()
     lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
@@ -513,7 +514,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     # Interpolate to first spectrum in the visit/orbit
     #print [len(x) for x in all_waves]
     #template_x, template_y = all_waves[-1], all_flux[-1]
-    template_x, template_y = all_waves[-1], np.median(all_flux[:18], axis=0)
+    template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
     for waves, fluxes, err, rootname in zip(all_waves, all_flux, all_errors, rootnames):
@@ -527,10 +528,10 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
             else:
                 if not peak:
                     #print len(template_x), len(template_y), len(waves), len(fluxes)
-                    shift, _ = spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
+                    shift, _ = r.spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
                 else:
                     i0, i1 = np.argmin(abs(template_x-1.14)), np.argmin(abs(template_x-1.6))
-                    shift, _ = spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
+                    shift, _ = r.spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
             shift_y = np.interp(template_x, template_x-shift, fluxes)
             shift_err = np.interp(template_x, template_x-shift, err)
         interp_spectra.append(shift_y)
