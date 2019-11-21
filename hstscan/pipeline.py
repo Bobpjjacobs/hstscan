@@ -657,7 +657,6 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 subexposure.SCI.data[bad_pixels] = 0
             logger.info('0th order flat-field correction performed')
 
-
     # Plot subexposures
     if t.debug:
         if t.flat_field:
@@ -674,6 +673,17 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                                                             ff_min=t.ff_min)
                 view(ff0, title='Zeroth flat-field: mean {:.4f}'.format(np.nanmean(ff0)), cbar=True, cmap='binary_r', vmin=0.9, vmax=1.1, show=False)
                 save_fig()
+
+            # Show effect of flat-field for first sub
+            sub = subexposures[0]
+            pre_image = sub.cut_image
+            ff = sub.ff
+            p.title('Sub {}'.format(i))
+            p.plot(np.sum(pre_image, axis=0), label='Pre-FF')
+            p.plot(np.sum(pre_image/ff, axis=0), label='Post-FF')
+            #p.plot(np.sum(pre_image/np.random.normal(1,0.01,ff.shape), axis=0), label='Random FF')
+            p.legend(fontsize=14)
+            save_fig()            
 
         arrays_plot([sub.SCI.data for sub in subexposures], name='Subexp', cbar=False, size=2, \
                         tight_layout=False, vmin=0., vmax=100, show=False)
@@ -840,7 +850,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
             x = np.arange(image.shape[1])
             new_image = []
             for row, sh in zip(image, corr_shs):
-                new_row = np.interp(x-sh, x, row)
+                new_row = np.interp(x, x-sh, row)
                 new_image.append(new_row)
             subexposures[i].SCI.data = np.array(new_image)
 
