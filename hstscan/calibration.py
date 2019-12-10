@@ -1,5 +1,4 @@
 import numpy as np
-from itertools import combinations_with_replacement as P_iter
 import astropy.io.fits as pyfits
 import my_fns as f
 import pylab as p
@@ -7,6 +6,8 @@ import data
 view = data.view_frame_image
 import logging
 import os
+from itertools import combinations_with_replacement as P_iter
+from Telescope_characteristics import HST
 
 def twoD_products_simple(x, y, m):
     ''' Effectively a binomial expansion?'''
@@ -50,7 +51,7 @@ def calc_poly_order(coeffs):
     m = -0.5+np.sqrt(0.25-2*c)
     return int(m)
 
-def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', x_len=256, y_len=256, XOFF=0, YOFF=0, data_dir='/', debug=False, log=False, pix_size=0.121, original_image=None, image_name='', disp_coef='default', object_ind=0, x=None, y=None):
+def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', x_len=256, y_len=256, XOFF=0, YOFF=0, data_dir='/', debug=False, log=False, pix_size=HST().xscale, original_image=None, image_name='', disp_coef='default', object_ind=0, x=None, y=None):
     '''
     Read in configuration file and evaluate the dispersion solution at each field value.
     n is the beam  order ('A':first, 'B':zeroth, 'C':second etc...)

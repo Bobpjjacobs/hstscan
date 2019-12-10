@@ -304,7 +304,7 @@ class Data_flt():
             if bjd:
                 # Now do the timing corrections
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), './src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '../src/js41_hst.vec')
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
@@ -476,8 +476,9 @@ def read_spec(fname, wmin=-np.inf, wmax=np.inf):
 def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, plot=False, direction='a', all_plot=False, save_extension='_spec.txt', shift=False, peak=False, sane=None, shift_file=None, **kwargs):
     
     from dispersion import interp_sanity_quad
-    from reduction import spec_pix_shift
-
+    import reduction as r
+    reload(r)
+    
     with open(source_dir+files) as g:
         lines = g.readlines()
     lines = [line.split('\t') for line in lines if not line.startswith('#') and not line.strip()=='']
@@ -514,7 +515,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     # Interpolate to first spectrum in the visit/orbit
     #print [len(x) for x in all_waves]
     #template_x, template_y = all_waves[-1], all_flux[-1]
-    template_x, template_y = all_waves[-1], np.median(all_flux[:18], axis=0)
+    template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
     for waves, fluxes, err, rootname in zip(all_waves, all_flux, all_errors, rootnames):
@@ -528,10 +529,10 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
             else:
                 if not peak:
                     #print len(template_x), len(template_y), len(waves), len(fluxes)
-                    shift, _ = spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
+                    shift, _ = r.spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
                 else:
                     i0, i1 = np.argmin(abs(template_x-1.14)), np.argmin(abs(template_x-1.6))
-                    shift, _ = spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
+                    shift, _ = r.spec_pix_shift(template_x[i0:i1], template_y[i0:i1], waves[i0:i1], fluxes[i0:i1], norm=True)
             shift_y = np.interp(template_x, template_x-shift, fluxes)
             shift_err = np.interp(template_x, template_x-shift, err)
         interp_spectra.append(shift_y)
@@ -1195,62 +1196,3 @@ def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'
 
                 g.write(line)
             # catalogue create for direct image
-
-
-
-############################################
-#                    misc                  #
-############################################
-
-# Data quality file flags and descriptions
-dq_info = {
-            0:      ('GOODPIXEL',       'OK'),
-            1:      ('SOFTERR',         'Reed-Solomon decoding error'),
-            2:      ('DATALOST',        'data replaced by fill value'),
-            4:      ('DETECTORPROB',    'bad detector pixel'),
-            8:      ('BADZERO',         'unstable IR zero-read pixel'),
-            16:     ('HOTPIX',          'hot pixel'),
-            32:     ('UNSTABLE',        'IR unstable pixel'),
-            64:     ('WARMPIX',         'unused'),
-            128:    ('BADBIAS',         'bad reference pixel value'),
-            256:    ('SATPIXEL',        'full-well or a-to-d saturated pixel'),
-            512:    ('BADFLAT',         'bad flat-field value'),
-            1024:   ('SPIKE',           'CR spike detected during ramp fitting'),
-            2048:   ('ZEROSIG',         'IR zero-read signal correction'),
-            4096:   ('TBD',             'cosmic ray detected by Astrodrizzle'),
-            8192:   ('DATAREJECT',      'rejected during up-the-ramp fitting'),
-            16384:  ('HIGH_CURVATURE',  'not used'),
-            32768:  ('RESERVED2',       'cant use')
-            }
-
-# Used below
-#FILTER, dx, dxerr, dy, dyerr, shift, shifterr 
-filt_data = [['F098M', 0.150, 0.026, 0.268, 0.030, 0.309, 0.034], 
-             ['F140W', 0.083, 0.020, 0.077, 0.022, 0.113, 0.030], 
-             ['F153M', 0.146, 0.022, -0.106, 0.029, 0.186, 0.036], 
-             ['F139M', 0.110, 0.022, 0.029, 0.028, 0.114, 0.036], 
-             ['F127M', 0.131, 0.023, -0.055, 0.024, 0.143, 0.034], 
-             ['F128N', 0.026, 0.022, -0.093, 0.021, 0.095, 0.030], 
-             ['F130N', 0.033, 0.014, 0.004, 0.019, 0.030, 0.024], 
-             ['F132N', 0.039, 0.018, 0.154, 0.022, 0.155, 0.028], 
-             ['F126N', 0.264, 0.018, 0.287, 0.025, 0.389, 0.031], 
-             ['F167N', 0.196, 0.012, -0.005, 0.013, 0.200, 0.018], 
-             ['F164N', 0.169, 0.022, -0.125, 0.024, 0.214, 0.032], 
-             ['F160W', 0.136, 0.013, 0.046, 0.016, 0.149, 0.021], 
-             ['F125W', 0.046, 0.022, 0.195, 0.023, 0.206, 0.032], 
-             ['F110W', -0.037, 0.023, 0.209, 0.029, 0.214, 0.037], 
-             ['F105W', 0.015, 0.023, 0.027, 0.030, 0.036, 0.038]]
-
-def get_wfc3_filter_offs(filt):
-    # Different filters have different inherent direct image offsets, refer to:
-    #http://www.stsci.edu/hst/wfc3/documents/ISRs/WFC3-2010-12.pdf
-    # copied into table above
-    # this is because the conf file was made using the F140W filter
-    filts = [ fd[0] for fd in filt_data ]
-    try:
-        i = filts.index(filt)
-        dx, dy = filt_data[i][1], filt_data[i][3]
-        return dx, dy
-    except: # filter missing
-        return None, None
-
