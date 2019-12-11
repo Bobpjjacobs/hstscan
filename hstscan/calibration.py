@@ -60,7 +60,6 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     '''
     # Read in source information, assumed brightest source is the target
     # Need to use the associated direct image catalogue
-
     assert os.path.isfile(catalogue), 'Catalogue file does not exist: {}'.format(catalogue)
     if x is None or y is None:
         with open(catalogue,'r') as cat:

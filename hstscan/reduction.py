@@ -484,7 +484,7 @@ def has_blobs(mask, tol=4):
 ########################################
 
 
-def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, maxmax=8e4, thresh=50.):
+def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, thresh=50.):
     '''
     Filter cosmic rays by using a local median of pixels
     First compute median in x and y, using sx and sy number of pixels either side
@@ -497,26 +497,30 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
     '''
 
     masks = []; medimages = []
+    ress = []; stds = []
+    # For each axis (y, x direction)
     for axis, shift in zip([0,1],[sy,sx]):
         if shift != 0:
+            # Find the local pixels median and std
             image_stacks = []
             for sh in range(-shift,shift+1,1): # 0 spatial, 1 spectral
                 if sh == 0: continue # dont count self
                 new_image = np.roll(image, sh, axis=axis)
                 image_stacks.append(new_image)
-
             medimage = np.nanmedian(image_stacks, axis=0)
             stdimage = np.nanstd(image_stacks, axis=0)
-            # std of the pixels
+
+            # check if pixels are outliers
             residuals = np.abs(image - medimage)
             mask = np.abs(residuals) > tol*stdimage
-            # ignore tiny hits
             mask = np.logical_and(mask, residuals > thresh)
             masks.append(mask); medimages.append(medimage)
+            ress.append(residuals); stds.append(residuals/stdimage)
+        else:
+            mask = np.zeros_like(image)
+            masks.append(mask)
     
-    mask = np.sum(masks, axis=0) == len(masks) # if both are flagged, flag
-    mask = np.logical_or(mask,image>maxmax)
-
+    mask = np.logical_or(masks[0], masks[1]) # flag if either are flagged
     if not mask_dq: mask[dq_mask] = False # dont want to count DQ pixels as CRs
     if replace == 'median':
         replace = np.mean(medimages, axis=0)
@@ -524,7 +528,16 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
         new_image = np.where(mask,replace,image)
     else:
         new_image = image
-    return new_image, mask
+    cr_info = {} # store some debugging info about CR properties
+    cr_info['mask_y'] = masks[0]
+    cr_info['mask_x'] = masks[1]
+    cr_info['res_y'] = ress[0]
+    cr_info['res_x'] = ress[1]
+    cr_info['sigma_y'] = stds[0]
+    cr_info['sigma_x'] = stds[1]
+    cr_info['cr_vals'] = np.hstack([ress[0][masks[0]].flatten(), ress[1][masks[1]].flatten()])
+    cr_info['cr_sigmas'] = np.hstack([stds[0][masks[0]].flatten(), stds[1][masks[1]].flatten()])
+    return new_image, mask, cr_info
 
 
 ########################################
