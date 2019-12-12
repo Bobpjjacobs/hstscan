@@ -19,6 +19,7 @@ view = data.view_frame_image
 
 reload(data)
 reload(cal)
+reload(r)
 
 def add_handlers(logger, log_file, warnings_file, level):
         '''
@@ -184,10 +185,10 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 'psf_h':130, 'mask_h':40,  'psf_w':220, 'n_masks': 3, 'neg_masks': 0, 
                 'postarg_yguess':True, 'default_scan': 'f',
                 'cr_local': True, 'cr_tol': 15, 'cr_replace': 'median', 'cr_plot': False, 
-                'cr_x': 5, 'cr_y': 5, 'cr_thresh': 50.,
+                'cr_x': 5, 'cr_y': 5, 'cr_thresh': 50., 'cr_mask_dq':True,
                 'cr_master': False, 'cr_mname': None, 
                 'dispersion': True, 'exp_shift':True, 'ref_exp': None, 'ref_wv0':0.9, 'ref_wv1':1.92, 
-                'pre_shift_ff':False, 'tsiaras':True, 'peak': False, 'xshift_ext':0., 'exp_drift':False, 
+                'pre_shift_ff':False, 'tsiaras':True, 'peak': False, 'xshift_ext':0., 'exp_drift':False, 'drift_max':2., 
                 'drift_width':4, 'drift_rowtol': 1.1,
                 'flat_field': True, 'ff_min':0.5,
                 'nysig':5, 'grid_y':20, 'grid_lam':20, 'two_scans':False, 'interp_kind':'linear',
@@ -585,7 +586,8 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                     # interpolate all rows to this row
                 else:
                     # Regular wavelength correction
-                    if t.scanned: assert t.exp_drift, 'Must re-interpolate image if not correcting for wavelength dependent photon trajectories'
+                    #if t.scanned: 
+                        #if not t.exp_drift: logger.warning('Should re-interpolate image if not correcting for wavelength dependent photon trajectories')
                     L = subexposure.SCI.data.shape[0]
                     subexp_time = subexposure.SCI.header['SAMPTIME']
                     print("###########")
@@ -611,7 +613,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         x1 = int(xpix)+200
                     L = subexposure.SCI.data.shape[0]
                     dL = (1014-L)/2
-                    print(t.flat_file_g141)
+
                     cut_image, ff, ff_error = cal.flat_field_correct( _waves, cut_image,
                                                     int(xpix)+dL, x1+dL, subexposure.ystart+dL, subexposure.yend+dL,
                                                     t.flat_file_g141, ff_min=t.ff_min)
@@ -687,7 +689,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             sub = subexposures[0]
             pre_image = sub.cut_image
             ff = sub.ff
-            p.title('Sub {}'.format(i))
+            p.title('Column sum: subexposure {}'.format(i))
             p.plot(np.sum(pre_image, axis=0), label='Pre-FF')
             p.plot(np.sum(pre_image/ff, axis=0), label='Post-FF')
             #p.plot(np.sum(pre_image/np.random.normal(1,0.01,ff.shape), axis=0), label='Random FF')
@@ -711,35 +713,36 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
 
     # Local CR removal
     if t.cr_local:
-        new_subs = []
+        new_subs = []; cr_values = []
         for i, subexposure in enumerate(subexposures):  
             ignore_mask = subexposure.mask # dont flag already masked pixels
             
-            CR_clean, CR_mask = r.spatial_median_filter(subexposure.SCI.data.copy(), ignore_mask, tol=t.cr_tol, replace=t.cr_replace,\
-                                    debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh)
+            CR_clean, CR_mask, CR_info = r.spatial_median_filter(subexposure.SCI.data.copy(), ignore_mask, tol=t.cr_tol, replace=t.cr_replace,\
+                                    debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh, mask_dq=not t.cr_mask_dq)
             n_crs = np.count_nonzero(CR_mask)
+            cr_values.append(CR_info['cr_vals'])
 
             subexposure.SCI.data = CR_clean
             #n_crs = np.count_nonzero(CR_mask[ypix-t.psf_h/2:ypix+t.psf_h/2,xpix-100:xpix+100])
             subexposure.n_crs = n_crs
             subexposure.CR_mask = CR_mask
-            logger.info('Removed {} CR pixels from subexposure {}'.format(n_crs,i+1))
+            #logger.info('Removed {} CR pixels from subexposure {}'.format(n_crs,i+1))
             subexposure.mask = np.logical_or(subexposure.mask, CR_mask)
 
             subexposure.SCI.header['CRs'] = (n_crs, 'Number of crs detected in box (local median)')
             # Remove CR hits, with NaN or custom CR_replace value
             if t.cr_replace: subexposure.mean_mask_pix(CR_mask, replace=t.cr_replace)
 
-            if t.cr_plot:
+            if t.debug and False:
                 # Plot locations of CR hits
-                view(subexposure.SCI.data, cbar=False, show=False, cmap='binary_r', alpha=1)
-                ax=p.gca()
-                ax.set_autoscale_on(False)
-                for j in range(subexposure.SCI.data.shape[0]):
-                    for k in range(subexposure.SCI.data.shape[1]):
-                        if CR_mask[j,k]: p.plot(k, j, marker='o', mec='r', mfc='None')
-                p.title('{} crs'.format(n_crs))
-                p.show()
+                p.subplot(1,2,1)
+                view(CR_info['mask_y'][subexposure.ystart:subexposure.yend,int(xpix):int(xpix)+200], 
+                        show=False, cbar=False, cmap='binary_r', title='CRs (y-axis outliers)')
+                p.subplot(1,2,2)
+                view(CR_info['mask_x'][subexposure.ystart:subexposure.yend,int(xpix):int(xpix)+200], 
+                        show=False, cbar=False, cmap='binary_r', title='CRs (x-axis outliers)')
+                save_fig()
+                
             new_subs.append(subexposure)
         subexposures = new_subs
     # Master CR removal
@@ -807,6 +810,15 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
         p.tight_layout()
         save_fig()
 
+        if t.cr_local:
+            # plot also distribution of values
+            p.title('Distribution of CR hits')
+            p.xlabel('Value (electrons)')
+            p.hist(np.hstack(cr_values), 20, edgecolor='k')
+            p.gca().set_autoscale_on(False)
+            p.plot([t.cr_thresh]*2, [0,1e4], ls='--', color='k')
+            save_fig()
+
         all_CRs = np.sum(CR_masks, axis=0)
         view(all_CRs, title='Distribution of CRs over exposure', cbar=False, show=False, vmin=0, vmax=1, cmap='binary_r')
         save_fig()
@@ -817,27 +829,31 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
         tot_image = tot_image[:, int(xpix):int(xpix)+200]
         ref_row = np.mean(tot_image, axis=0)
         x_row = np.arange(len(ref_row))
-        shs, ers = [], []
-        for row in tot_image:
+        shs, ers, skips = [], [], []
+        for j, row in enumerate(tot_image):
+            skip = 0
             sh, er = r.spec_pix_shift(x_row, ref_row, x_row, row)
-            if np.max(row) < np.max(tot_image)/t.drift_rowtol: sh, er = 0, 0
-            shs.append(sh); ers.append(er)
-        shs, ers = map(np.array, [shs, ers])
+            if np.max(row) < np.max(tot_image)/t.drift_rowtol: 
+                sh, er, skip = 0, 0, 1
+            if abs(sh) > t.drift_max: 
+                sh, er, skip = 0, 0, 1
+            shs.append(sh); ers.append(er); skips.append(skip)
+        shs, ers, skips = map(np.array, [shs, ers, skips])
         h0 = np.sum(shs[len(shs)/2]==0)
         h1 = np.sum(shs[len(shs)/2:]==0)
         
-        sh_stack = []
-        for i in range(-t.drift_width, t.drift_width+1):
-            sh_rol = np.roll(shs[h0:-h1], i)
-            if i > 0:
-                sh_rol[:i] = sh_rol[i+1]
-            if i < 0:
-                sh_rol[i:] = sh_rol[i-1]
-            sh_stack.append(sh_rol)
-        m_stack, s_stack = np.mean(sh_stack, axis=0), np.std(sh_stack, axis=0)
-
         corr_shs = shs.copy()
-        corr_shs[h0:-h1] = m_stack
+        if not t.drift_width is None:
+            sh_stack = []
+            for i in range(-t.drift_width, t.drift_width+1):
+                sh_rol = np.roll(shs[h0:-h1], i)
+                if i > 0:
+                    sh_rol[:i] = sh_rol[i+1]
+                if i < 0:
+                    sh_rol[i:] = sh_rol[i-1]
+                sh_stack.append(sh_rol)
+            m_stack, s_stack = np.mean(sh_stack, axis=0), np.std(sh_stack, axis=0)
+            corr_shs[h0:-h1] = m_stack
 
         if t.debug:
             p.subplot(1,2,1)
@@ -847,7 +863,9 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             view(tot_image, show=False, cbar=False)
             save_fig()
             p.title('Smoothing length {}'.format(t.drift_width))
-            p.plot(corr_shs, np.arange(len(tot_image)), marker='o', ls='--')
+            p.plot(corr_shs, np.arange(len(tot_image)), marker='o', ls='--', label='Shifted')
+            p.plot(corr_shs[skips], np.arange(len(tot_image))[skips], marker='o', color='r', ls='None', label='Skipped')
+            p.legend()
             p.gca().set_autoscale_on(False)
             p.plot(shs, np.arange(len(tot_image)), marker='o', ls='--', alpha=0.1, zorder=-10)
             #p.xlim(-1,1)
@@ -941,8 +959,8 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                 'shift_spectra': False, 'shift_wv0':1.14, 'shift_wv1':1.6, 'peak':False,
                 'opt_ext': True, 's': 0, 'v_0': 20**2, 'q': 1, 's_clip': None, 's_cosmic': None, 'func_type': 'spline',
                 'method': 'lsq', 'fit_tol':0.01,
-                'step': None, 'order': 2, 'skip_fit': False, 'remove_bg': True, 'top_half':False,
-                'k_col': 9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
+                'step': None, 'order': 2, 'skip_fit': False, 'remove_bg': True, 'fit_dq':False, 'fit_cr':False,
+                'top_half':False, 'k_col': 9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                 }
     if conf_file:
         conf_kwargs = data.read_conf_file(conf_file)
@@ -1051,6 +1069,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             # Change mask to optimal extraction format
             # 1s where good, 0s where bad
             M_DQ, M_CR = np.logical_not(mask).astype(int), np.ones_like(mask) # just put CRs in DQ mask
+            M_blank = np.ones_like(M_DQ)
             if t.skip_fit: logger.warning('Not fitting profile, using flux instead')
 
             # toggle removing the background before optimal extraction
@@ -1068,7 +1087,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             spec, specV, P, V = ea.extract_spectrum(D=D, S=S, V_0=t.v_0, Q=t.q, V=V, s_clip=t.s_clip, s_cosmic=t.s_cosmic, \
                                     func_type=t.func_type, method=t.method, debug=t.oe_debug, tol=t.fit_tol, M_DQ=M_DQ, M_CR=M_CR, \
                                     pdf_file=oe_pdf_file, step=t.step, order=t.order, skip_fit=t.skip_fit, bg=bg,  \
-                                    k_col=t.k_col, k_row=t.k_row, logger=logger)
+                                    k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr, logger=logger)
             if t.debug and np.any(np.isnan(P)): view(D); view(P, show=False); view(np.isnan(P), alpha=0.5, cmap='binary',cbar=False)
             if np.any(np.isnan(spec)) and t.debug: p.plot(spec); p.title('NaNs in spectrum'); save_fig()
             assert not np.any(np.isnan(P)), 'NaNs in spatial profile for subexposure {}'.format(n_sub)
@@ -1092,12 +1111,10 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                     smooth_spec.append(col)
                 P = np.vstack(smooth_spec).T
             P = P / np.sum(P, axis=0)
-            V = ea.initial_variance_estimate(D=D, V_0=t.v_0, Q=t.q) + bg_err**2 # background calc affects variance, normally handled by opt_ext
             spec, specV = ea.optimized_spectrum(D, t.s, P, V, M)
         Ps.append(P)
         # Optimal Extraction
         # Sum spatial
-        print(len(subexposure.waves), len(spec))
         spectrum = f.Spectrum(subexposure.waves,spec,x_unit='Wavelength (microns)', y_unit='electrons')
         spectra.append(spectrum)
         variances.append(specV)
@@ -1121,7 +1138,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
     if t.debug:
         p.figure()
         #p.subplot(2,1,1)
-        p.title('Subexposure spectra')
+        p.title('Subexposure spectra (no interpolation)')
         for i, spec in enumerate(spectra):
             spec.plot(show=False, label=i)
         p.legend(fontsize='x-small')
@@ -1138,11 +1155,11 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
     # threshold is what percentage of the flux missing
     if t.ignore_blobs:
         Ms = DQs
-        bad_subs = np.array([ np.any(np.sum(M*P, axis=0)[50:150] > t.blob_thresh) for P, M in zip(Ps, Ms) ]).astype(bool)
+        bad_subs = np.array([ np.sum(np.sum(M*P, axis=0)[50:150]) > t.blob_thresh*100 for P, M in zip(Ps, Ms) ]).astype(bool)
         # only check the inner 100 pixels, outside is mostly bg and so can be masked
         good_subs = np.logical_not(bad_subs)
         logger.warning('Ignoring subexposures {} due to bad pixels on spectrum'.format(np.arange(len(bad_subs))[bad_subs]))
-
+        logger.warning([ '{:.2f} %'.format(np.sum(np.sum(M*P, axis=0)[50:150])) for P, M in zip(Ps, Ms) ])
         if t.debug:
             for i in range(len(good_subs)):
                 spec = spectra[i]
@@ -1193,7 +1210,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
     # So now add all the scaled spectra together, interpolated to a common wavelength scale
     interp_spectra = []
     # templates wavelength from first (in time)
-    x, y = spectra[-1].x, spectra[-1].y
+    x, y = np.mean([spec.x for spec in spectra], axis=0), np.mean([spec.y for spec in spectra], axis=0)
     sub_shifts = []
     # actual interpolation
     if t.shift_spectra:
@@ -1205,7 +1222,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             else:
                 shift, err = r.spec_pix_shift(x, y, spec.x, spec.y, norm=True)
             sub_shifts.append((shift,err))
-            shift_y = np.interp(x, x+shift, spec.y)
+            shift_y = np.interp(x, x-shift, spec.y)
             interp_spectra.append(shift_y)
     else:
         # Just interpolate to the first subexposure
@@ -1236,7 +1253,14 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
 
     exp_spectrum = f.Spectrum(x, y, x_unit='Spectral Pixel', y_unit=unit)
 
-    if t.debug:
+    if t.debug and len(spectra) > 1:
+        p.figure()
+        p.title('Subexposure spectra (interpolated)')
+        for i, spec in enumerate(interp_spectra):
+            p.plot(x, spec, label=i)
+        p.legend(fontsize='x-small')
+        save_fig()
+
         p.plot(exp_spectrum.x, exp_spectrum.y, label='Combined spectrum')
         if t.ignore_blobs: 
             p.plot(exp_spectrum.x, old_combined, ls='--', zorder=-1, label='Including bad spectra')

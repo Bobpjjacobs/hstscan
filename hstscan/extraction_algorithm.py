@@ -650,7 +650,7 @@ def medfilt (x, k):
 
 # RUN ALGORITHM #
 
-def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None, pdf_file=None, skip_fit=False, bg=None, logger=None):
+def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None, pdf_file=None, skip_fit=False, bg=None, fit_dq=False, fit_cr=False, logger=None):
     '''
     Extract spectrum using either a poly or gauss fit.
     Toggle cosmic ray removal by setting s_cosmic to None or
@@ -690,11 +690,26 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
 
     if M_DQ is None:
         M_DQ = np.ones_like(D)
-        if M_CR is None: M = None; M_CR = np.ones_like(D)
-        else: M = M_CR
-    else: M = np.logical_and(M_DQ, M_CR)
+        if M_CR is None: 
+            M = None; M_CR = np.ones_like(D)
+        else: 
+            if fit_cr:
+                M = np.ones_like(D)
+                M_true = M_CR
+            else:
+                M = M_CR
+                M_true = M
+    else:
+        if fit_dq:
+            if fit_cr:
+                M = np.ones_like(D)                
+            else:
+                M = M_CR
+            M_true = np.logical_and(M_DQ, M_CR)
+        else:    
+            M = np.logical_and(M_DQ, M_CR)
+            M_true = M
 
- 
     if False:
         if M is not None:
             # interpolate over bad pixels in D marked by M==0 along dispersion direction
@@ -790,17 +805,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
 
     # Now that we have the spatial profile, apply it to the original image
     # so as to not actually include bad pixels in the final results use M mask
-    f, fV = optimized_spectrum(origima, S, P, V, M)
-
-    temp_M = np.ones_like(M)
-    temp_M[np.logical_not(np.isfinite(origima))] = 0
-    f2, fV2 = optimized_spectrum(origima, S, P, V, temp_M)
-
-    #p.title('OE Spectrum')
-    #p.plot(f)
-    #p.plot(f2)
-    #p.show()
-    #view(M, cmap='binary', cbar=False)
+    f, fV = optimized_spectrum(origima, S, P, V, M_true)
 
     if debug:
         p.subplot(2,1,1)
@@ -819,6 +824,5 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     if hasattr(pdf, 'close'):
         pdf.close()
         del pdf
-
 
     return f, fV, P, V
