@@ -370,6 +370,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
             tol = 1.49012e-08 # fix None problem
         if not step:
             step = np.nanmean(distn)*np.sqrt(np.finfo(float).eps) #https://mail.scipy.org/pipermail/scipy-user/2010-July/025975.html
+            print "STEEEEEEEP", step
         if debug: print 'step size:', step
         results = optimize.leastsq(weight_function, coef0, args=(x, distn, weights, func_type, method), full_output=1, ftol=tol, epsfcn=step)
         if debug:
@@ -423,7 +424,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             outliers = np.logical_not(M_l)
 
         while loop:
-        # loop over sigma clipping procedure until can ignore all outlier pixels
+            # loop over sigma clipping procedure until can ignore all outlier pixels
             count += 1
             #print('Iteration {}'.format(count))
             # find weights, low variance are favouredlogg
@@ -617,8 +618,29 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         V[:,i] = V_l.copy()
         f[i] = f_l
         fV[i] = fV_l
-    if n_success/float(n_fits) >= 0.9: logger.info('{} successes out of {} total fits'.format(n_success, n_fits))
-    else: logger.warning('Warning: {} column fits failed out of {} total fits'.format(n_fits-n_success, n_fits))
+        if i in fail_list and i != 0 and np.mean(D[:,i]) > 1000.: #Extraction failed in a column that is not part of the background
+            D_col = D[:,i]
+            D_col1 = D[:,i-1]
+            Good = M_DQ[:,i].astype(bool)
+            Bad = np.logical_not(M_DQ[:,i].astype(bool))
+            fig = p.figure()
+            p.subplot(211)
+            p.scatter(np.arange(len(D_col[Good])), D_col[Good] - D_col1[Good], color='b', label='Good pixels')
+            p.scatter(np.arange(len(D_col[Bad])), D_col[Bad] - D_col1[Bad], color='r', label='Bad pixels')
+            p.title('Pixel values of column {} (for which fitting failed) compared to column {}'.format(i, i-1))
+            p.ylabel('Column {} - Column {}'.format(i,i-1))
+            p.legend()
+            p.subplot(212)
+            p.scatter(np.arange(len(D_col[Good])),D_col[Good], color='b')
+            p.scatter(np.arange(len(D_col[Bad])),D_col[Bad], color='r')
+            p.ylabel('Column {}'.format(i))
+            fig.subplots_adjust(hspace=0)
+            p.show()
+
+    if n_success/float(n_fits) >= 0.9:
+        logger.info('{} successes out of {} total fits'.format(n_success, n_fits))
+    else:
+        logger.warning('Warning: {} column fits failed out of {} total fits'.format(n_fits-n_success, n_fits))
 
     logger.warning('Optimal extraction fitting failed for columns: {}'.format(fail_list))
 

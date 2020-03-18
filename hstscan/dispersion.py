@@ -15,6 +15,7 @@ def get_conf_coeffs(WFC_conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G
         lines = cf.readlines()
         lines = [line[:-1] for line in lines if line[0] != '#']
     DISP_COEFFS, TRACE_COEFFS = [], []
+    BEAM_X1, BEAM_X2 = [], []
     for line in lines:
         if line.startswith('BEAM'+str(n)):
             BEAM_X1, BEAM_X2 = [int(pos) for pos in line.split()[1:]]
@@ -30,7 +31,8 @@ def get_conf_coeffs(WFC_conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G
             nth_coeffs = line.split(' ')[1:]
             nth_coeffs = [float(coeff) for coeff in nth_coeffs if coeff != '']
             TRACE_COEFFS.append(nth_coeffs)
-    return DISP_COEFFS, TRACE_COEFFS
+    BEAM = [BEAM_X1, BEAM_X2]
+    return BEAM, DISP_COEFFS, TRACE_COEFFS
 
 def get_fielddep_coeffs(xs, ys, COEFFS, ms=None, permute_arrays=[None]*2):
     '''
@@ -54,7 +56,7 @@ def dispersion_solution(x0, L, Dxoff, Dxref, ystart, yend,
     yss = np.linspace(ystart,yend,wdpt_grid_y) + 512-0.5*L # let y vary along scan
     lams = np.linspace(wvmin,wvmax,wdpt_grid_lam)*1e4 # in angstrom
 
-    if not DISP_COEFFS or not TRACE_COEFFS: DISP_COEFFS, TRACE_COEFFS = get_conf_coeffs(WFC_conf_file)
+    if not DISP_COEFFS or not TRACE_COEFFS: BEAM, DISP_COEFFS, TRACE_COEFFS = get_conf_coeffs(WFC_conf_file)
     # Pre-compute some steps for speed since need to do this at all gridpoints
     ms = map(cal.calc_poly_order, [TRACE_COEFFS[1], TRACE_COEFFS[0],DISP_COEFFS[1],DISP_COEFFS[0]])
 

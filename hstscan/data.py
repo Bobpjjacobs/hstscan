@@ -123,7 +123,7 @@ class Single_ima():
             try:
                 self.SCI.data[self.mask] = replace
             except AttributeError:
-                raise 'The file has no DQ data or mask.'
+                raise Exception('The file has no DQ data or mask.')
 
         mask = np.sum([ self.DQ.data/flag % 2 == 1 for flag in int_flags ], axis=0).astype(bool)
 
@@ -897,6 +897,8 @@ def write_reduced_fits(subexposures, Primary, t, dest_dir=None):
     for line in history:
         Primary.header['HISTORY'] = line
 
+    Primary.header['xpix'] = subexposures[0].xpix
+
     hdu = pyfits.HDUList(Primary)
 
     for subexposure in subexposures:
@@ -916,6 +918,7 @@ def write_reduced_fits(subexposures, Primary, t, dest_dir=None):
         hdu.append(BG)
         TIME = pyfits.ImageHDU(data=subexposure.TIME.data, header=subexposure.TIME.header, name='TIME')
         hdu.append(TIME)
+
 
     fname = dest_dir + Primary.header['ROOTNAME'] + '_red.fits'
     f.silentremove(fname)
@@ -1009,8 +1012,10 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
         print 'Starting visit', no
         j = 0
         line_dat = []
+        #print os.listdir(data_dir)
         for file in os.listdir(data_dir):
             if file.startswith(prop_str+no) and file.endswith('_ima.fits'):
+                print file
                 j += 1
                 exp = load(data_dir + file, conf_file, bjd=True)
                 t = exp.t
@@ -1028,6 +1033,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
         f.silentremove(data_dir+'/visit_'+no+'.lis')
         with open(data_dir+'/visit_'+no+'.lis', 'w') as g:
             g.write(lines)
+            g.write('\n')
         print '#####################\nVisit', no, 'completed.\n#####################'
 
 
@@ -1043,6 +1049,7 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
 
     for line in lines:
         l_rootname, l_filter, l_expstart, l_scan = line.split('\t')
+        print "lrootname", l_rootname
         if l_filter.startswith('F'):
             # Direct image filter
             cat = data_dir + l_rootname + '_flt_1.cat'
