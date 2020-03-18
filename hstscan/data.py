@@ -578,23 +578,6 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     broad_flux = [ np.sum(fluxes*in_bin) for fluxes in interp_spectra ]
     broad_errors = [ np.sqrt(np.sum((errors**2*in_bin))) for errors in interp_errors ]
 
-    '''
-    if wmin == -np.inf or wmax == np.inf:
-        broad_flux = [ np.sum([ fl for wv, fl in zip(template_x, fluxes) if wv > wmin and wv < wmax ]) for fluxes in interp_spectra ]
-        broad_errors = [ np.sqrt(np.sum([ err**2 for wv, err in zip(template_x, err) if wv > wmin and wv < wmax ])) for err in interp_errors ]
-    else:
-        broad_flux, broad_errors = [], []
-        for fluxes, errs in zip(interp_spectra, interp_errors):
-            
-            def fl_fn(wv): return np.interp(wv, template_x, fluxes)
-            area = integrate.quad(fl_fn, wmin, wmax)[0]
-  
-            # crude error estm
-            error = np.sqrt(np.sum((errs**2*in_bin)))
-
-            broad_flux.append(area)
-            broad_errors.append(error)
-    '''
     if plot:
         for t, fl, direction in zip(broad_time, broad_flux, directions):
             if direction == 'r':
@@ -602,7 +585,6 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
             elif direction == 'f':
                 color = 'b'
             p.plot(t, fl, ls='None', marker='o', color=color, **kwargs)
-        #p.show()
     return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions), np.array(shifts)
 
 def get_sub_times(files, source_dir):
@@ -702,12 +684,15 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
 #################
 
 def view_frame_image(count, units='', cbar=True, show=True, title='', xlabel='Spectral Pixel', ylabel='Spatial Pixel', origin='lower', **kwargs):
-    p.imshow(count, origin=origin,**kwargs)
+    im = p.imshow(count, origin=origin,**kwargs)
     p.xlabel(xlabel)
     p.ylabel(ylabel)
     p.title(title)
     if cbar:
-        cbar = p.colorbar()
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        divider = make_axes_locatable(p.gca())
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        cbar = p.colorbar(im, cax=cax)
         cbar.set_label(units)
     if show: p.show()
 
