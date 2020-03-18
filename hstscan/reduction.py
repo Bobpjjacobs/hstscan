@@ -632,7 +632,6 @@ def spec_pix_shift(template_x, template_y, x, y, norm=True, interp_template=True
     out = curve_fit(func, template_x, ref_y, p0=(p0), **kwargs)
     shift = out[0][0]
     err = np.diag(np.sqrt(out[1]))[0]
-    #assert success, 'Fitting failed'
     return shift, err
 
 
