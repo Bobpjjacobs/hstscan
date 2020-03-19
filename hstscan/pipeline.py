@@ -355,7 +355,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
     if t.debug:
         # Show background area
         if t.bg and t.bg_area:
-            view(exposure.reads[0].SCI.data, show=False, vmin=0, vmax=50*len(subexposures), title='Background Area')
+            view(exposure.reads[0].SCI.data, show=False, vmin=0, title='Background Area')
             view(bg_mask, alpha=0.5, show=False, cbar=False, cmap='binary_r')
             save_fig()
         if t.bg:
