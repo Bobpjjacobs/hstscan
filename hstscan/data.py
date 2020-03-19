@@ -196,7 +196,7 @@ class Data_ima():
     Creates object containing all the reads from the exposure _ima file.
     '''
 
-    def __init__(self,filename, conf_file, bjd=True):
+    def __init__(self,filename, conf_file, bjd=True, bjd_file='/home/jacob/hstscan/src/js41_hst.vec'):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
 
@@ -1049,7 +1049,6 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
 
     for line in lines:
         l_rootname, l_filter, l_expstart, l_scan = line.split('\t')
-        print "lrootname", l_rootname
         if l_filter.startswith('F'):
             # Direct image filter
             cat = data_dir + l_rootname + '_flt_1.cat'

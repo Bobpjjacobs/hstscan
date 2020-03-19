@@ -202,7 +202,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                'exp_drift':False, 'drift_max':2., 'drift_width':4, 'drift_rowtol':1.1,
                'flat_field':True, 'ff_min':0.5,
                'nysig':5, 'grid_y':20, 'grid_lam':20, 'two_scans':False, 'interp_kind':'linear',
-               'flat_file_g141':'None', 'conf_file_g141':'None', 'trans_file_g141':'None',
+               'flat_file_g141':'None', 'conf_file_g141':'None', 'trans_file_g141':'None', 'hst_eph_file':None,
                'stellar_spectrum':'None',
                'contam_thresh':0.01,
                'object_ind':0}
@@ -495,7 +495,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 shift_in_x = r.find_xshift_di(exposure, subexposures[1], direct_image, conf_kwargs, wave_grid, cal_disp_poly_args)
                 #shift_in_x = r.find_xshift_di2(exposure, subexposures[1],  direct_image, conf_kwargs, wave_grid)
                 """
-                shift_in_x = calc_abs_xshift(direct_image, exposure, subexposures[1], tel, t, scan_direction, x_di, y_di, catalogue, conf_kwargs, plot=True)
+                shift_in_x = calc_abs_xshift(direct_image, exposure, subexposures[0], tel, t, scan_direction, x_di, y_di, catalogue, conf_kwargs, plot=True)
                 save_fig()
             else:
                 shift_in_x = 0
@@ -506,6 +506,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
         else:
             # Apply external shift (if any) to direct image (pre-computed)
             x_di += t.xshift_ext
+            shift_in_x = t.xshift_ext
             logger.debug('External xshift of direct image applied, of {} pix'.format(t.xshift_ext))
             exposure.xshift_ext = t.xshift_ext
             exposure.Primary.header['SHIFTEXT'] = t.xshift_ext
@@ -524,6 +525,9 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                     if ref_exp != exposure.rootname:
                         ref_exp = data.load(t.save_dir + ref_exp + '_red.fits', conf_file)
                         xpix = ref_exp.Primary.header['xpix']
+                        #Cross correlate to the reference image:
+
+
                         logger.info('Reference exposure used for xpix.')
                         xpix_initiated = True
             if step == 'final':
@@ -544,9 +548,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         #    red_ref_exp = data.load(t.dest_dir + exposure.Primary.header['ROOTNAME'] + '_red.fits', conf_file)
                         #    print red_ref_exp.TIME
                         # Load in reference exposure
-                        print(ref_exp, "HHHHHHH")
                         ref_exp = data.load(t.save_dir + ref_exp + '_red.fits', conf_file)
-                        #ref_mask = np.sum([sub.mask for sub in ref_exp.subexposures], axis=0).astype(bool)
                         ref_image = np.nansum([sub.SCI.data for sub in ref_exp.subexposures], axis=0)
                         ref_POSTARG1, ref_POSTARG2, ref_PA_V3 = ref_exp.Primary.header['POSTARG1'], \
                                                                 ref_exp.Primary.header['POSTARG2'], \
@@ -558,10 +560,12 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         else:
                             ref_scan_direction = -1
                             logger.info('Reverse scan')
-                        #print("Calculating xhsiiiiiiiiiiiiiiiit")
-                        ref_shift_in_x = calc_abs_xshift(direct_image, ref_exp, ref_exp.subexposures[1], tel, t,
-                                                         ref_scan_direction, x_di - shift_in_x, y_di, catalogue,
-                                                         conf_kwargs, plot=False)
+                        if t.calc_abs_xshift:
+                            ref_shift_in_x = calc_abs_xshift(direct_image, ref_exp, ref_exp.subexposures[1], tel, t,
+                                                             ref_scan_direction, x_di - shift_in_x, y_di, catalogue,
+                                                             conf_kwargs, plot=False)
+                        else:
+                            ref_shift_in_x = 0
 
                         if t.pre_shift_ff and False:  # not working
                             # Apply flat-field correction before shift calculation
@@ -593,8 +597,6 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         xshift2 = xshift
                         xshift += ref_shift_in_x - shift_in_x
                         xshift3 = ref_shift_in_x - shift_in_x
-                        print("hellowowowowowwo", xshift, shift_in_x, ref_shift_in_x)
-                        #      r.spec_pix_shift(x, ref_tot, x, tot))
                     else:
                         xshift = 0.
                         xshift2 = 0.
@@ -646,6 +648,10 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 image = subexposure.SCI.data.copy()
 
                 Dxref = (POSTARG1 - di_ps1) / tel.xscale
+                if not t.calc_abs_xshift and not t.xshift_ext:
+                    xpix_initiated = True
+                    xpix = x_di + Dxref
+                    logger.info("Applying an xshift of {} because of the POSTARG argument".format(Dxref))
                 # moving the telescope right moves the target right on the image as it is facing away
 
                 # Different filters have small inherent direct image offsets
@@ -656,7 +662,6 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                     XOFF, YOFF = 0., 0.
 
                 # Guess position of x and y from DI
-                #print("xxxxxxxxxxsssssssshhhiiiifffttt3", x_di, xshift3, shift_in_x)
                 if not xpix_initiated:
                     xpix = x_di + xshift3
                 y0 = y_di + (scan_direction * (
@@ -682,7 +687,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 ystart, ymid, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig,
                                                     two_scans=t.two_scans, debug=True)
 
-
+                print(i, ystart, ymid, yend)
 
                 subexposure.xpix = xpix
                 subexposure.ystart = ystart;
