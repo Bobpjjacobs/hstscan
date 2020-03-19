@@ -196,7 +196,7 @@ class Data_ima():
     Creates object containing all the reads from the exposure _ima file.
     '''
 
-    def __init__(self,filename,bjd=True):
+    def __init__(self,filename,bjd=True, bjd_file='/home/jacob/hstscan/src/js41_hst.vec'):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -217,7 +217,7 @@ class Data_ima():
             # Now do the timing corrections
             if bjd:
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '/home/jacob/hstscan/src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), bjd_file)
 
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
@@ -281,7 +281,7 @@ class Data_red(Data_ima):
 class Data_flt():
     '''Break up an flt file into separate extensions and add methods'''
 
-    def __init__(self,filename, bjd=True):
+    def __init__(self,filename, bjd=True, bjd_file='/home/jacob/hstscan/src/js41_hst.vec'):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -302,7 +302,7 @@ class Data_flt():
             if bjd:
                 # Now do the timing corrections
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '../src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), bjd_file)
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc)

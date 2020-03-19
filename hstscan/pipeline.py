@@ -179,6 +179,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
     toggles = {'system': 'WASP-18', 'source_dir': '/home/jacob/hst_data/WASP-18/', 'save_dir': None,
                 'debug': False, 'pdf': False, 'logger': True,
                 'scanned':True, 'scan_rate':None, 'units': True, 'nlincorr':False, 'read_noise': 20, 'remove_scan': False,
+                'bjd':True, 'bjd_file':'/home/jacob/hstscan/src/js41_hst.vec',
                 'dq_replace': None, 'dq_mean_width':1, 'dq_flags': [4, 32], 'skip_start': 1, 'skip_end': 0,
                 'bg': True, 'bg_plot': False, 'bg_area':True, 'bg_x':0, 'bg_y':0, 'bg_h':50, 'bg_w':50,
                 'psf_h':130, 'mask_h':40,  'psf_w':220, 'n_masks': 3, 'neg_masks': 0, 
@@ -204,7 +205,7 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
 
     # Open up an exposure if you input a filename
     if type(exposure) == str:
-        exposure = data.load(t.source_dir+exposure, bjd=False)
+        exposure = data.load(t.source_dir+exposure, bjd=t.bjd, bjd_file=t.bjd_file)
 
     # Set up logging for errors and info
     if t.logger:
