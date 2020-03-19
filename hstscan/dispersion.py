@@ -416,4 +416,4 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p.legend()
         p.show()
     
-    return ystart, yend
+    return ystart, yend, mu

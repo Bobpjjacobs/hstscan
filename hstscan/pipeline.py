@@ -17,7 +17,7 @@ view = data.view_frame_image
 
 reload(data)
 reload(cal)
-reload(r)
+reload(disp)
 
 def add_handlers(logger, log_file, warnings_file, level):
         '''
@@ -566,11 +566,11 @@ def reduce_exposure(exposure, conf_file=None, **kwargs):
                 if y0 + width0/2. > subexposure.SCI.data.shape[1]: y0 = subexposure.SCI.data.shape[1]-width0/2.
                 elif y0 - width0/2. < 0: y0 = width0/2.
                 # Fit for y scan height and position given guess
-                ystart, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=False)
+                ystart, yend, ymid = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig, two_scans=t.two_scans, debug=False)
 
                 subexposure.xpix = xpix
                 subexposure.ystart = ystart; subexposure.yend = yend
-                subexposure.ypix = (subexposure.ystart+subexposure.yend)/2.
+                subexposure.ypix = ymid # (subexposure.ystart+subexposure.yend)/2.
 
                 # Calculate wavelength solution
                 if t.tsiaras:
@@ -1030,6 +1030,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             logger.info('Spectrum located at pixel {} in spatial direction'.format(xpix))
 
             ypix = subexposure.ypix
+            print("Subexposure ypix guess:", ypix)
             D, mask, bg, err = map(lambda image: r.box_cut(ypix, image, t.box_h, force_shape=False), [D, mask, bg, err])
 
         else:
