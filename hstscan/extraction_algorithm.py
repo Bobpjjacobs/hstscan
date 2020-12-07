@@ -605,7 +605,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
 
 def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima, M=None, pdf=None,
         bg_array=None, M_DQ=None, M_CR=None, custom_knots=None,
-        outliers_to_average=False, slopefactor=0.1, slope_second_order=False, oe_debug=False):
+        outliers_to_average=False, slopefactor=0.1, slope_second_order=False, oe_debug=False, show_knots=False):
     '''
     Fit a spatial profile to an image,
     pixels with low variance are weighted higher in the fit to
@@ -817,7 +817,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
 
             showlist = [D.shape[1] / 2, D.shape[1] / 2 + 1]
             showlist.append(92)
-            if (custom_knots is None and debug) and i in showlist:
+            if ((custom_knots is None and debug) or show_knots) and i in showlist:
                 #print P_l_unscaled - P_l2_unscaled, order
                 print f_l, "pl", np.sum(f_l), np.sum(distn) / np.max(distn)
                 print "Knots estimated by pipeline are:", knots
@@ -1022,7 +1022,7 @@ def medfilt (x, k):
 def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', oe_debug=False,
                      debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None,
                      pdf_file=None, skip_fit=False, bg=None, fit_dq=False, fit_cr=False, custom_knots=None,
-                     outliers_to_average=False, slopefactor=0.1, slope_second_order=False, logger=None):
+                     outliers_to_average=False, slopefactor=0.1, slope_second_order=False, logger=None, show_knots=False):
     '''
     Extract spectrum using either a poly or gauss fit.
     Toggle cosmic ray removal by setting s_cosmic to None or
@@ -1141,7 +1141,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     P, V, f, fV = FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima=origima,
                       M=M, pdf=pdf, bg_array=bg, M_DQ=M_DQ, M_CR=M_CR, custom_knots=custom_knots,
                       outliers_to_average=outliers_to_average, slopefactor=slopefactor,
-                      slope_second_order=slope_second_order, oe_debug=oe_debug)
+                      slope_second_order=slope_second_order, oe_debug=oe_debug, show_knots=show_knots)
     #V = estimate_variance(f=f, P=P, S=S, V_0=V_0, Q=Q)
 
     n, loop = 0, True

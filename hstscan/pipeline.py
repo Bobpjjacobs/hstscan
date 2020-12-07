@@ -1109,7 +1109,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                'step':None, 'order':1, 'skip_fit':False, 'remove_bg':True, 'fit_dq':False, 'fit_cr':False,
                'top_half':False, 'k_col':9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                'outliers_to_average':False, 'slopefactor':0.1, 'slope_second_order':False,
-               'custom_knots_F':None, 'custom_knots_R':None,
+               'custom_knots_F':None, 'custom_knots_R':None, 'show_knots':False,
                'wshift_to_ref':False, 'ref_exp': None
                }
     if conf_file:
@@ -1343,49 +1343,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                                                     k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr,
                                                     outliers_to_average=t.outliers_to_average,
                                                     custom_knots=custom_knots, slope_second_order=t.slope_second_order,
-                                                    logger=logger)
-            """
-            spec1, specV1, P1, V1 = ea.extract_spectrum(D=D1, S=S1, V_0=t.v_0, Q=t.q, V=V1, s_clip=t.s_clip,
-                                                    s_cosmic=t.s_cosmic, \
-                                                    func_type=t.func_type, method=t.method, debug=t.debug,
-                                                    oe_debug=t.oe_debug, tol=t.fit_tol, M_DQ=M_DQ1, M_CR=M_CR1, \
-                                                    pdf_file=oe_pdf_file, step=t.step, order=t.order,
-                                                    skip_fit=t.skip_fit, bg=bg1, slopefactor=t.slopefactor,
-                                                    k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr,
-                                                    outliers_to_average=t.outliers_to_average,
-                                                    custom_knots=custom_knots+2, slope_second_order=t.slope_second_order,
-                                                    logger=logger)
-            spec2, specV2, P2, V2 = ea.extract_spectrum(D=D2, S=S2, V_0=t.v_0, Q=t.q, V=V2, s_clip=t.s_clip,
-                                                    s_cosmic=t.s_cosmic, \
-                                                    func_type=t.func_type, method=t.method, debug=t.debug,
-                                                    oe_debug=t.oe_debug, tol=t.fit_tol, M_DQ=M_DQ2, M_CR=M_CR2, \
-                                                    pdf_file=oe_pdf_file, step=t.step, order=t.order,
-                                                    skip_fit=t.skip_fit, bg=bg2, slopefactor=t.slopefactor,
-                                                    k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr,
-                                                    outliers_to_average=t.outliers_to_average,
-                                                    custom_knots=custom_knots+1, slope_second_order=t.slope_second_order,
-                                                    logger=logger)
-            spec3, specV3, P3, V3 = ea.extract_spectrum(D=D3, S=S3, V_0=t.v_0, Q=t.q, V=V3, s_clip=t.s_clip,
-                                                    s_cosmic=t.s_cosmic, \
-                                                    func_type=t.func_type, method=t.method, debug=t.debug,
-                                                    oe_debug=t.oe_debug, tol=t.fit_tol, M_DQ=M_DQ3, M_CR=M_CR3, \
-                                                    pdf_file=oe_pdf_file, step=t.step, order=t.order,
-                                                    skip_fit=t.skip_fit, bg=bg3, slopefactor=t.slopefactor,
-                                                    k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr,
-                                                    outliers_to_average=t.outliers_to_average,
-                                                    custom_knots=custom_knots-1, slope_second_order=t.slope_second_order,
-                                                    logger=logger)
-            spec4, specV4, P4, V4 = ea.extract_spectrum(D=D4, S=S4, V_0=t.v_0, Q=t.q, V=V4, s_clip=t.s_clip,
-                                                    s_cosmic=t.s_cosmic, \
-                                                    func_type=t.func_type, method=t.method, debug=t.debug,
-                                                    oe_debug=t.oe_debug, tol=t.fit_tol, M_DQ=M_DQ4, M_CR=M_CR4, \
-                                                    pdf_file=oe_pdf_file, step=t.step, order=t.order,
-                                                    skip_fit=t.skip_fit, bg=bg4, slopefactor=t.slopefactor,
-                                                    k_col=t.k_col, k_row=t.k_row, fit_dq=t.fit_dq, fit_cr=t.fit_cr,
-                                                    outliers_to_average=t.outliers_to_average,
-                                                    custom_knots=custom_knots-2, slope_second_order=t.slope_second_order,
-                                                    logger=logger)
-            #"""
+                                                    logger=logger, show_knots=t.show_knots)
             if t.debug and np.any(np.isnan(P)):
                 view(D);
                 view(P, show=False); view(np.isnan(P), alpha=0.5, cmap='binary', cbar=False)
