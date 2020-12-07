@@ -252,7 +252,7 @@ class Spectrum():
     Basic spectrum object.
     Calling the spectrum at a given x gives you a y by linear interpolation.
     '''
-    def __init__(self, x, y, x_unit=None, y_unit=None, fname=None):
+    def __init__(self, x, y, x_unit=None, y_unit=None, fname=None, refshift=0, refshifterr=0, refstretch=0):
         #should include a zip sort
         if len(x) != len(y):
             raise InputError('Input data should be of the same length')
@@ -261,6 +261,9 @@ class Spectrum():
         self.x_unit = x_unit
         self.y_unit = y_unit
         self.fname = fname
+        self.refshift = refshift
+        self.refshifterr = refshifterr
+        self.refstretch = refstretch
 
     def __call__(self,x):
         '''

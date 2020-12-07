@@ -28,7 +28,7 @@ def read_conf_file(fname):
                     val = False
                 elif key in ['n_masks','cr_tol','s','v_0','q','s_clip','s_cosmic','fit_tol']:
                     val = float(val)
-                elif key in ['skip_start', 'skip_end', 'psf_h', 'box_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width', 'drift_width']:
+                elif key in ['skip_start', 'skip_end', 'psf_h', 'cr_x', 'cr_y', 'object_ind', 'dq_mean_width', 'drift_width']:
                     val = int(val)
                 elif key == 'dq_flags':
                     # 4: Bad detector pixel, 32: Unstable photometric response, 256: Saturated, 512: Bad flat field
@@ -196,34 +196,32 @@ class Data_ima():
     Creates object containing all the reads from the exposure _ima file.
     '''
 
-    def __init__(self,filename, conf_file, bjd=True, bjd_file='/home/jacob/hstscan/src/js41_hst.vec'):
+    def __init__(self,filename, hst_file='/home/jacob/Project_1/js41_hst.vec',
+                 tai_file='/home/jacob/Project_1/tai_utc.txt', bjd=True):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
 
-        ##Read some config params that will be used
-        conf_kwargs = read_conf_file(conf_file)
-
         file_type = filename.split('_')
-        if not file_type[-1] == 'ima.fits':
-            raise_with_traceback(InputError('Wrong file type.'))
+        assert file_type[-1] == 'ima.fits', '{} has the wrong file type; it should be _ima.fits'.format(filename)
 
         with pyfits.open(filename, memmap=False) as HDUList:
             # memmap forces you to keep every fits file open which is not possible when
             # analysing >70 files per visit.
             self.Primary = HDUList[0]
-            mjd_ut = np.mean([HDUList[0].header['EXPSTART'],HDUList[0].header['EXPEND']])
+            mjd_ut = np.mean([self.Primary.header['EXPSTART'],self.Primary.header['EXPEND']])
             if mjd_ut < 2400000.5:
                 jd_utc = mjd_ut + 2400000.5 # undo mjd correction
             else: # it must have been in JD
                 jd_utc = mjd_ut
-            RA, DEC = HDUList[0].header['RA_TARG'], HDUList[0].header['DEC_TARG']
+            RA, DEC = self.Primary.header['RA_TARG'], self.Primary.header['DEC_TARG']
 
             # Now do the timing corrections
             if bjd:
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), conf_kwargs['hst_eph_file'])
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
+
                 # utc -> tdb
-                tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
+                tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
                 dt = bjd_dt + tdb_dt
                 self.t = jd_utc + dt/60./60./24. # in days
                 self.dt = dt # timing offset in seconds
@@ -260,7 +258,7 @@ class Single_red(Single_ima):
 
 class Data_red(Data_ima):
 
-    def __init__(self,filename, conf_file, bjd=None):
+    def __init__(self,filename, bjd=None):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -283,7 +281,8 @@ class Data_red(Data_ima):
 class Data_flt():
     '''Break up an flt file into separate extensions and add methods'''
 
-    def __init__(self,filename, conf_file, bjd=True):
+    def __init__(self,filename, hst_file='/home/jacob/Project_1/js41_hst.vec',
+                 tai_file='/home/jacob/Project_1/tai_utc.txt', bjd=True):
         self.filename = filename
         self.rootname = filename.split('/')[-1].split('_')[0]
         file_type = filename.split('_')
@@ -304,10 +303,10 @@ class Data_flt():
             if bjd:
                 # Now do the timing corrections
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), '../src/js41_hst.vec')
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
-                tdb_dt = timecorr.jdutc2jdtdb(jd_utc)
+                tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
                 dt = bjd_dt + tdb_dt
                 self.t = jd_utc + dt/60./60./24. # in days
                 self.dt = dt # timing offset in seconds
@@ -330,20 +329,17 @@ class Data_flt():
             self.TIME = fits_file[5]
             self.WCSCORR = fits_file[6]
 
-            #place each exposure in its own object
-            reads, i = [], 1
-            while i < len(fits_file)-1:
-                [SCI, ERR, DQ, SAMP, TIME] = fits_file[i:i+5]
-                read = Single_ima(SCI,ERR,DQ,SAMP,TIME)
-                reads.append(read)
-                i += 5
-            self.reads = reads
+            #place this in a read
+            [SCI, ERR, DQ, SAMP, TIME] = fits_file[1:6]
+
+            self.reads = [Single_ima(SCI,ERR,DQ,SAMP,TIME)]
 
 
 class Data_drz():
     '''Break up a drz file into separate extensions and add methods'''
 
-    def __init__(self,filename, conf_file, bjd=None):
+    def __init__(self,filename, hst_file='/home/jacob/Project_1/js41_hst.vec',
+                 tai_file='/home/jacob/Project_1/tai_utc.txt', bjd=True):
         self.filename = filename
         file_type = filename.split('_')
         if not file_type[-1] == 'drz.fits':
@@ -359,12 +355,36 @@ class Data_drz():
             self.CTX = fits_file[3]
             self.HDRTAB = fits_file[4]
             self.SCI.data # otherwise the file is closed? since the data are never accessed
+
+            mjd_ut = np.mean([self.Primary.header['EXPSTART'],self.Primary.header['EXPEND']])
+            if mjd_ut < 2400000.5:
+                jd_utc = mjd_ut + 2400000.5 # undo mjd correction
+            else: # it must have been in JD
+                jd_utc = mjd_ut
+            RA, DEC = self.Primary.header['RA_TARG'], self.Primary.header['DEC_TARG']
+
+            # Now do the timing corrections
+            if bjd:
+                # jd -> bjd
+                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
+
+                # utc -> tdb
+                tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
+                dt = bjd_dt + tdb_dt
+                self.t = jd_utc + dt/60./60./24. # in days
+                self.dt = dt # timing offset in seconds
+                self.t_units = 'BJD_TT'
+            else:
+                self.t = jd_utc
+                self.dt = 0
+                self.t_units = 'JD_UTC'
             
 
 
 
 ########################################
 #             Load in data             #
+#            and properties            #
 ########################################
 
 
@@ -377,14 +397,15 @@ def which_class(filename):
     else:
         raise 'Unsupported file type '+ split_name[-1][:-5]
 
-def load(filename, conf_file, **kwargs):
+def load(filename, **kwargs):
     '''Load in data as appropriate class instance.'''
     if not filename.split('_')[-1].endswith('.fits'):
-        return Data_ima(filename+'_ima.fits', conf_file, **kwargs)
+        return Data_ima(filename+'_ima.fits', **kwargs)
     Class = which_class(filename)
-    return Class(filename, conf_file, **kwargs)
+    return Class(filename , **kwargs)
 
-def load_all_ima(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False, direction='a', conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def load_all_ima(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False,
+                 direction='a'):
     '''
     Load in all the data as objects.
 
@@ -400,9 +421,10 @@ def load_all_ima(system = 'GJ-1214', source_file='input_image.lis', data_dir='/h
     lines = [line[0] for line in lines if line[1].startswith('G')]
     for fname in lines:
 	file = source_dir+fname+'_ima.fits'
-        yield load(file, conf_file)
+        yield load(file)
 
-def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False, direction='a', conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False,
+                 direction='a'):
     '''
     Load in all the data as objects.
 
@@ -417,7 +439,7 @@ def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/h
         lines = [line for line in lines if line[-1].startswith(direction)]
     lines = [line[0] for line in lines if line[1].startswith('G')]
     for fname in lines:
-        yield load(source_dir+fname+'_red.fits', conf_file)
+        yield load(source_dir+fname+'_red.fits')
 
 def read_visit_names(source_file='input_image.lis', data_dir = '/net/glados2.science.uva.nl/api/jarcang1/GJ-1214/', append=''):
     '''
@@ -455,6 +477,80 @@ def read_visit_names(source_file='input_image.lis', data_dir = '/net/glados2.sci
             i += 1 + n
     return sets, time_sets, dir_sets
 
+def read_scan_direction(exposure, t, logger):
+    """
+    Reads the scan direction and scan rate
+
+    :param exposure: A .fits exposure
+    :param t: The option paramters with which the reduction is run
+    :return: scan direction and the scan rate.
+    """
+    # Find scan direction from positional offset
+    if exposure.Primary.header['POSTARG2'] >= 0.:
+        scan_direction = +1;
+        logger.info('Forward scan')
+    else:
+        scan_direction = -1;
+        logger.info('Reverse scan')
+    if t.scanned:
+        if not 'scan_rate' in dir(t):
+            scan_rate = exposure.Primary.header['SCAN_RAT']
+            if scan_rate == 0.:
+                logger.warning('SCANNED=True while exposure scan rate is zero')
+        else:
+            if 'SCAN_RAT' in exposure.Primary.header:
+                assert abs(t.scan_rate - exposure.Primary.header['SCAN_RAT']) / t.scan_rate < 0.01, \
+                    'Scan rates do not match (input {}, fits {})'.format(t.scan_rate,
+                                                                         exposure.Primary.header['SCAN_RAT'])
+            scan_rate = t.scan_rate
+    else:
+        scan_rate = 0.
+    return scan_direction, scan_rate
+
+def find_star_in_catalogue(catalogue, di_name, t, logger):
+    """
+    Finds the central coordinates in a catalogue file
+
+    :param catalogue: The name of the catalogue file
+    :param di_name: name of the direct image file
+    :param t: The options
+    :return: The x-coordinate, y-coordinate of the direct image plus the postarg1, postarg2 and PA_V3 arguments of the
+             direct image.
+    """
+    print "catalogue", catalogue
+    try:
+        if os.path.exists(t.source_dir + di_name + '_ima.fits'):
+            direct_image = Data_ima(t.source_dir + di_name + '_ima.fits', hst_file=t.hst_eph_file,
+                                    tai_file=t.tai_utc_file, bjd=False)
+            logger.warning('Catalogue file: {}'.format(di_name + '_ima.fits'))
+        else:
+            direct_image = Data_flt(t.source_dir + di_name + '_flt.fits', hst_file=t.hst_eph_file,
+                                    tai_file=t.tai_utc_file, bjd=False)
+            logger.warning('Catalogue file: {}'.format(di_name + '_flt.fits'))
+    except IOError:  # no _ima or _flt for _drz files of multiple direct images
+        direct_image = Data_drz(t.source_dir + di_name + '_drz.fits', bjd=False)
+        logger.warning('No catalogue file found for {}'.format(di_name + '_drz.fits'))
+    di_size = direct_image.reads[0].SCI.shape[0]
+    if np.log2(di_size) % 1 != 0:
+        # Remove reference pixles from direct image
+        di_size -= 10  # ref pix
+
+    di_ps1, di_ps2, di_pav3 = direct_image.Primary.header['POSTARG1'], direct_image.Primary.header['POSTARG2'], \
+                              direct_image.Primary.header['PA_V3']
+    with open(catalogue, 'r') as cat:
+        lines = cat.readlines()
+        objects = [line[:-1].split() for line in lines if line[0] != '#']
+        objects = [[float(val) for val in obj] for obj in objects]
+        objects = sorted(objects, key=lambda obj:obj[0])
+        print("########################")
+        obj = objects[t.object_ind]
+
+        SEx, SEy = obj[1], obj[2]
+        # SEx, SEy = cal.center_of_flux(t.source_dir+di_name, SEx, SEy, size=10)
+        # Location of the direct image
+        x_di, y_di = SEx, SEy  # w.r.t to reference pixel of direct image exposure
+        logger.debug('Direct image location of ({},{})'.format(x_di, y_di))
+    return x_di, y_di, di_ps1, di_ps2, di_pav3, direct_image
 
 def read_spec(fname, wmin=-np.inf, wmax=np.inf):
     with open(fname,'r') as g:
@@ -513,8 +609,6 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 pass
 
     # Interpolate to first spectrum in the visit/orbit
-    #print [len(x) for x in all_waves]
-    #template_x, template_y = all_waves[-1], all_flux[-1]
     template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)
     # median doesnt work for direction='a'
     interp_spectra, interp_errors, shifts = [], [], []
@@ -528,7 +622,6 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 shift = file_shifts[rootname]
             else:
                 if not peak:
-                    #print len(template_x), len(template_y), len(waves), len(fluxes)
                     shift, _ = r.spec_pix_shift(template_x, template_y, waves, fluxes, norm=True)
                 else:
                     i0, i1 = np.argmin(abs(template_x-1.14)), np.argmin(abs(template_x-1.6))
@@ -579,23 +672,6 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
     broad_flux = [ np.sum(fluxes*in_bin) for fluxes in interp_spectra ]
     broad_errors = [ np.sqrt(np.sum((errors**2*in_bin))) for errors in interp_errors ]
 
-    '''
-    if wmin == -np.inf or wmax == np.inf:
-        broad_flux = [ np.sum([ fl for wv, fl in zip(template_x, fluxes) if wv > wmin and wv < wmax ]) for fluxes in interp_spectra ]
-        broad_errors = [ np.sqrt(np.sum([ err**2 for wv, err in zip(template_x, err) if wv > wmin and wv < wmax ])) for err in interp_errors ]
-    else:
-        broad_flux, broad_errors = [], []
-        for fluxes, errs in zip(interp_spectra, interp_errors):
-            
-            def fl_fn(wv): return np.interp(wv, template_x, fluxes)
-            area = integrate.quad(fl_fn, wmin, wmax)[0]
-  
-            # crude error estm
-            error = np.sqrt(np.sum((errs**2*in_bin)))
-
-            broad_flux.append(area)
-            broad_errors.append(error)
-    '''
     if plot:
         for t, fl, direction in zip(broad_time, broad_flux, directions):
             if direction == 'r':
@@ -603,10 +679,9 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
             elif direction == 'f':
                 color = 'b'
             p.plot(t, fl, ls='None', marker='o', color=color, **kwargs)
-        #p.show()
     return np.array(broad_time), np.array(broad_flux), np.array(broad_errors), np.array(directions), np.array(shifts)
 
-def get_sub_times(files, source_dir, conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def get_sub_times(files, source_dir):
 
     fstub = files.split('.')[0] 
     # Creat sub_times file
@@ -621,10 +696,10 @@ def get_sub_times(files, source_dir, conf_file='/home/jacob/Project_1/js41_hst.v
         for rootname in rootnames:
             ima = rootname+'_ima.fits'
             try:
-                ima = load(source_dir+ima, conf_file)
+                ima = load(source_dir+ima)
             except IOError:
                 _source_dir = '/'.join(source_dir.split('/')[:-2])+'/'
-                ima = load(_source_dir+ima, conf_file)
+                ima = load(_source_dir+ima)
             times.append([str(read.SCI.header['ROUTTIME']) for read in ima.reads[:-2]])
 
         try:
@@ -644,7 +719,7 @@ def get_sub_times(files, source_dir, conf_file='/home/jacob/Project_1/js41_hst.v
         sub_times[line[0]] = line[1:]
     return sub_times
 
-def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, direction='a', save_extension='_spec.txt', conf_file='/home/jacob/Project_1/js41_hst.vec', **kwargs):
+def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_data/', wmin=-np.inf, wmax=np.inf, direction='a', save_extension='_spec.txt'):
     from reduction import spec_pix_shift
     with open(source_dir+files) as g:
         lines = g.readlines()
@@ -657,7 +732,7 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
     directions = [line[3][0] for line in lines]
 
     # load in sub times:
-    sub_times = get_sub_times(files, source_dir, conf_file)
+    sub_times = get_sub_times(files, source_dir)
 
     all_flux, all_waves, all_times, all_errors = [], [], [], []
     for rootname, time in zip(rootnames, times):
@@ -665,7 +740,7 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
         for file in os.listdir(source_dir):
             if file.endswith(save_extension) and file.startswith(rootname+'_subs'):
                 # got em!
-                data = np.loadtxt(source_dir+file, skiprows=1)
+                data = np.loadtxt(source_dir+file, skiprows=2)
                 waves = data[:,0]
                 errors = data[:,2::2]
                 fluxes = data[:,1::2]
@@ -702,17 +777,49 @@ def broadband_sub_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hs
 # Viewing tools #
 #################
 
-def view_frame_image(count, units='', cbar=True, show=True, title='', xlabel='Spectral Pixel', ylabel='Spatial Pixel', origin='lower', **kwargs):
-    p.imshow(count, origin=origin,**kwargs)
-    p.xlabel(xlabel)
-    p.ylabel(ylabel)
-    p.title(title)
-    if cbar:
-        cbar = p.colorbar()
-        cbar.set_label(units)
-    if show: p.show()
+def view_frame_image(count, units='', direct_image=False, cbar=True, show=True, title='', xlabel='Spectral Pixel', ylabel='Spatial Pixel',
+                     origin='lower', Return=False, bg_mask=None,**kwargs):
+    if direct_image or bg_mask is not None:
+        if bg_mask is not None:
+            fig, ax = p.subplots(figsize=(10,10))
+            im = ax.imshow(count, origin=origin, **kwargs)
+            bg_alphas = 0.3 * np.ones_like(bg_mask)
+            ax.imshow(np.array([bg_mask.T, bg_mask.T, bg_mask.T, bg_alphas.T]).T, origin=origin, cmap='binary_r')
+        else:
+            fig, ax = p.subplots()
+            im = ax.imshow(count, origin=origin,**kwargs)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        if cbar:
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            Cbar = p.colorbar(im, cax=cax)
+            Cbar.set_label(units)
+        if show:
+            p.show()
+        elif Return:
+            return ax
+    else:
+        im = p.imshow(count, origin=origin,**kwargs)
+        p.xlabel(xlabel)
+        p.ylabel(ylabel)
+        p.title(title)
+        if cbar:
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+            divider = make_axes_locatable(p.gca())
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            Cbar = p.colorbar(im, cax=cax)
+            Cbar.set_label(units)
+        if show:
+            p.show()
+        elif Return:
+            return im
 
-def view_3d_image(image, xlabel='Spectral Pixel', ylabel='Spatial Pixel', zlabel='electrons/s', title='', cmap='jet', show=True):
+
+def view_3d_image(image, xlabel='Spectral Pixel', ylabel='Spatial Pixel', zlabel='electrons/s', title='', cmap='jet',
+                  show=True):
 
     from mpl_toolkits.mplot3d import Axes3D
     fig = p.figure()
@@ -769,6 +876,31 @@ def save_frame_image(count, filename, **kwargs):
         if show:
             p.show()
 
+def plot_data(x, y, title='', ylabel='', xlabel='', **kwargs):
+    """
+    Plots data
+
+    :param x: The x-data
+    :param y: The y-data
+    :param title: The title
+    :param ylabel: The label on the y-axis
+    :param xlabel: The label on the x-axis
+    :param kwargs: Extra arguments
+    :return:
+    """
+    if not type(x[0]) in [int, float]:
+        for i,X in enumerate(x):
+            kwargsnew = {key: kwargs[key][i] for key in kwargs.keys()}
+            p.plot(X, y[i], **kwargsnew)
+    else:
+        p.plot(x, y, **kwargs)
+    p.title(title)
+    p.xlabel(xlabel)
+    p.ylabel(ylabel)
+
+
+
+
 def hist_image(image=np.zeros(1), show=True, ymax=None, xlabel=None, ylabel=None, title=None, filename=None, hist_data=None, **kwargs):
     image = image.copy()
     image[np.isnan(image)] = 0
@@ -796,7 +928,7 @@ def hist_image(image=np.zeros(1), show=True, ymax=None, xlabel=None, ylabel=None
         p.show()
 
 
-def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/api/jarcang1/GJ-1214/', HST=False, direction='a', show=True, conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/api/jarcang1/GJ-1214/', HST=False, direction='a', show=True):
     bgs, bg_errs, times, colors = [], [], [], []
     sub_bgs ,sub_errs, sub_times, sub_colors = [], [], [], []
     if source_file:
@@ -809,7 +941,7 @@ def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/a
         rootnames = [line[0] for line in lines]
         fnames = [ data_dir + rootname + '_red.fits' for rootname in rootnames ]
         for fname in fnames:
-                exp = load(fname, conf_file)
+                exp = load(fname)
                 exp_bgs ,exp_errs, exp_times, exp_colors = [], [], [], []
                 for sub in exp.subexposures:
                     bg = sub.SCI.header['BG']
@@ -853,7 +985,7 @@ def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/a
         print 'Warning loading a lot of files'
         for file in os.listdir(data_dir):
             if file.endswith('_red.fits'):
-                exp = load(data_dir+file, conf_file)
+                exp = load(data_dir+file)
                 for sub in exp.subexposures:
                     try:
                         bg = sub.SCI.header['BG']
@@ -884,7 +1016,7 @@ def create_sub_history(t):
     history.append('dispersion solution correction set to {}'.format(t.dispersion))
     history.append('local cosmic ray removal set to {}'.format(t.cr_local))
     if t.cr_local:
-        history.append('            - with tolerance {} replacing with {}'.format(t.cr_tol,t.cr_replace))
+        history.append('            - with tolerances {}, {} replacing with {}'.format(t.cr_tolx, t.cr_toly,t.cr_replace))
     history.append('DQ flagged pixels replaced with {}'.format(t.dq_replace))
     return history
 
@@ -964,10 +1096,23 @@ def make_driz_list(data_dir='/home/jacob/hst_data/'):
     with open(data_dir+'/visit_driz.lis','w') as g:
         for file in os.listdir(data_dir):
             if file.endswith('_drz.fits'):
-                with pyfits.open(data_dir+'/'+file, memmap=False) as HDU:
+                with pyfits.open(data_dir + file, memmap=False) as HDU:
                     if HDU[0].header['FILTER'].startswith('F'):
                         g.write(file+'\n')
                         cnt += 1
+            elif file.endswith('_flt.fits'):
+                drzfile = file.replace('_flt.fits', '_drz.fits')
+                imafile = file.replace('_flt.fits', '_ima.fits')
+                if not os.path.isfile(data_dir + drzfile):
+                    with pyfits.open(data_dir + file, memmap=False) as HDU:
+                        if HDU[0].header['FILTER'].startswith('F'):
+                            g.write(file + '\n')
+                            cnt += 1
+                    if os.path.isfile(data_dir + imafile):
+                        if not os.path.isdir(data_dir + 'not-used_direct_images'):
+                            os.mkdir(data_dir + 'not-used_direct_images')
+                        os.rename(data_dir + imafile, data_dir + 'not-used_direct_images/' + imafile)
+
     assert cnt > 0, 'No driz combined images found for data in {}'.format(data_dir)
 
 def make_input_image_list(data_dir='/home/jacob/hst_data/'):
@@ -987,13 +1132,15 @@ def make_input_image_list(data_dir='/home/jacob/hst_data/'):
         for line in all_lines:
             g.write(line)
 
-def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-18/', prop_str='iccz', conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-18/', prop_str='iccz',
+                           conf_file='/Users/bob/Documents/PhD/KELT-9b/transmission_reduction.conf'):
     '''
     List all exposures, sorted into orbits with corresponding direct images.
     '''
     os.nice(20)
     #for no in ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10','11', '12', '13', '14', '15']:
     nos = []
+    conf_kwargs = read_conf_file(conf_file)
     if input_file is None:
         for file in os.listdir(data_dir):
             if file.startswith(prop_str) and file.endswith('_ima.fits'):
@@ -1012,21 +1159,29 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
         print 'Starting visit', no
         j = 0
         line_dat = []
-        #print os.listdir(data_dir)
         for file in os.listdir(data_dir):
-            if file.startswith(prop_str+no) and file.endswith('_ima.fits'):
+            if file.startswith(prop_str+no) and (file.endswith('_ima.fits') or file.endswith('_drz.fits')):
+                if file.endswith('_drz.fits'):
+                    imafile = file.replace('_drz.fits', '_ima.fits')
+                    if imafile in os.listdir(data_dir):
+                        #There's an _ima equivalent to this file, so ignore this _drz file
+                        continue
                 print file
                 j += 1
-                exp = load(data_dir + file, conf_file, bjd=True)
-                t = exp.t
+                exp = load(data_dir + file, bjd=True, hst_file=conf_kwargs['hst_eph_file'],
+                            tai_file=conf_kwargs['tai_utc_file'])
+                time = exp.t
                 filt = exp.Primary.header['FILTER']
                 rootname = exp.Primary.header['ROOTNAME']
-                POSTARG2 = exp.Primary.header['POSTARG2']
-                if POSTARG2 >= 0:
-                    direction = 'reverse'
+                if filt.startswith('F'):
+                    direction = 'Direct'
                 else:
-                    direction = 'forward'
-                line_dat.append([str(rootname), str(filt), str(t), direction])
+                    POSTARG2 = exp.Primary.header['POSTARG2']
+                    if POSTARG2 >= 0:
+                        direction = 'reverse'
+                    else:
+                        direction = 'forward'
+                line_dat.append([str(rootname), str(filt), str(time), direction])
                 print 'Completed file', j, 'for visit', no
         line_dat.sort()
         lines = '\n'.join(['\t'.join(dat) for dat in line_dat])
@@ -1036,8 +1191,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
             g.write('\n')
         print '#####################\nVisit', no, 'completed.\n#####################'
 
-
-def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
+def find_catalogue(rootname, logger, data_dir='/home/jacob/hst_data/'):
     '''
     Find direct image (orbit) catalogue corresponding to a given
     grism exposure.
@@ -1047,6 +1201,7 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
         lines = g.readlines()
     lines = [line for line in lines if not line.startswith('#') and not line.strip()=='']
 
+    cat = None
     for line in lines:
         l_rootname, l_filter, l_expstart, l_scan = line.split('\t')
         if l_filter.startswith('F'):
@@ -1054,7 +1209,20 @@ def find_catalogue(rootname, data_dir='/home/jacob/hst_data/'):
             cat = data_dir + l_rootname + '_flt_1.cat'
             cat_rootname = l_rootname
         if rootname in l_rootname:
+            if cat is None: continue
+            if not os.path.isfile(cat):
+                logger.warning('No catalogue file found for {}'.format(cat))
+                # then catalogue may be for visit drizzled file
+                catalogue_split = cat.split('_')
+                catalogue_split[-3] = catalogue_split[-3][:-3] + '011'
+                cat = '_'.join(catalogue_split)
+                if not os.path.isfile(cat):
+                    catalogue_split[-3] = catalogue_split[-3][:-3] + '010'
+                    cat = '_'.join(catalogue_split)
+                logger.warning('Replaced catalogue with {}'.format(cat))
             return cat, cat_rootname
+    assert cat_rootname is not None, "No direct image found for {}".format(rootname)
+    return cat, cat_rootname
 
 def find_reference_exp(rootname, data_dir='/home/jacob/hst_data/WASP-18/'):
     '''
@@ -1081,6 +1249,8 @@ def find_reference_exp(rootname, data_dir='/home/jacob/hst_data/WASP-18/'):
             store_next = False
         if rootname in l_rootname:
             return ref_rootname
+
+
 
 #####################################
 ## Tools for reading emcee results ##
@@ -1130,7 +1300,7 @@ def emcee_chain_reader(fname):
 ####### Orbit cats #######
 ##########################
 
-def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/', conf_file='/home/jacob/Project_1/js41_hst.vec'):
+def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'):
     '''
     Fit a gaussian to direct image to create visit catalogue.
     Use same format as SExtractor for catalogue files.
@@ -1141,7 +1311,7 @@ def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'
 
     data_dir = source_dir
     if not os.path.exists(data_dir+'input_image.lis'):
-        make_input_image_list(data_dir=source_dir, conf_file = conf_file)
+        make_input_image_list(data_dir=source_dir)
     if not os.path.exists(data_dir+'visit_driz.lis'):
         make_driz_list(data_dir=source_dir)
 
@@ -1151,10 +1321,9 @@ def create_orbit_cats_gauss(target='GJ-1214', source_dir='/home/jacob/hst_data/'
         for line in driz_list:
             fname = line[:-1]
             dest_file = data_dir + fname.split('_')[0]+'_flt_1.cat'
-            print dest_file
             flt_fname  = data_dir + fname.split('_')[0]+'_flt.fits'
 
-            di = data.load(flt_fname, conf_file)
+            di = data.load(flt_fname)
             image = di.SCI.data.copy()
 
             params = Parameters()

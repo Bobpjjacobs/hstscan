@@ -9,6 +9,8 @@ class HST:
         self.name   = "HST"
         self.xscale = 0.1355    #arcsec/pixel
         self.yscale = 0.1211    #arcsec/pixel
+        self.w_ref1 = 1.12      #micron  #start of reliable spectrum
+        self.w_ref2 = 1.63      #micron  #end of reliable spectrum
 
         # Data quality file flags and descriptions
         self.dq_info = {

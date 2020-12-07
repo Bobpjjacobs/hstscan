@@ -2,11 +2,15 @@
 # Imports of basic functions and packages
 import my_fns
 from scipy import optimize
-from scipy.interpolate import UnivariateSpline, InterpolatedUnivariateSpline
+from scipy.interpolate import UnivariateSpline, InterpolatedUnivariateSpline, interp1d, LSQUnivariateSpline
 from my_fns import np, p
 from data import view_frame_image as view
 import logging
+import reduction as r
+import data
+import os
 from matplotlib.backends.backend_pdf import PdfPages
+
 
 # Notes from Algorithm paper
 
@@ -53,14 +57,214 @@ def estimate_spectrum(D,S,V):
     '''
     return np.nansum(D-S, axis=0), np.nansum(V, axis=0)
 
-def optimized_spectrum(D, S, P, V, M):
+def optimized_spectrum(D, S, P, V, M, debug=False):
     '''Extract the spectrum using the spatial profile.'''
     denom = np.nansum(np.multiply(M,np.divide(np.square(P),V)), axis=0)
     # optimized spectrum
     f_opt = np.divide(np.nansum(np.multiply(M, np.divide(np.multiply(P,D-S),V)), axis=0), denom)
     # optimized variance
     fV_opt = np.divide(np.nansum(np.multiply(M,P), axis=0),denom)
+    if debug:
+        print denom
+        #print #np.sum(V), np.sum(np.divide(np.square(P),V))
+        print np.multiply(M, np.divide(np.multiply(P, D - S), V)), denom, f_opt
+        print M
+        #print #np.sum(P), f_opt
     return f_opt, fV_opt
+
+def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
+    """
+    Shifts a spectrum to the wavelength solution of a reference exposure. The wavelength solution of the input
+     exposure is assumed to be almost correct. That is, to *exactly* match the correct wavelength solution only a shift
+     would be needed.
+
+    To calculate this shift we fit the spectrum of the first subexposure to the first (or last, depending on
+     a match or mismatch in scan direction) subexposure of the reference exposure.
+
+    :param spectra: A list of input spectra
+    :param x: The wavelength solution of the input spectra before a shift is applied
+    :param y: The average spectrum over the *whole* exposure
+    :param t: A dict with all input options
+    :param scan_dir_match: (bool) Does the scan direction match with the scan direction of the reference exposure?
+    :param logger: A logger object
+    :return:
+    """
+    Stretch = False
+
+    if scan_dir_match:
+        s = 0
+        #s = -1
+        #s = 2
+    else:
+        s = -1
+        #s = 0
+        #s = 1
+
+
+    if os.path.isfile(t.save_dir + t.ref_exp + "_subs" + t.save_extension):
+        ref = np.loadtxt(t.save_dir + t.ref_exp + "_subs" + t.save_extension, skiprows = 2).T
+    else:
+        logger.warning("Could not find a file with the subspectra of the reference exposure. Now using the combined" +
+                       " spectrum. This will give inferior results.")
+        try:
+            ref = np.loadtxt(t.save_dir + t.ref_exp + t.save_extension, skiprows=2).T
+        except IOError:
+            raise Exception("No reduced spectrum found for {}. Please first extract a spectrum ".format(t.ref_exp) +
+                            "from {} or disable the wshift_to_ref toggle".format(t.ref_exp))
+
+    x_ref = ref[0]
+    y_ref = ref[1]
+
+    # Use the first/last subexposure as reference if ref and spectra have the same scan direction
+    y_spec = spectra[s].y
+    if len(x_ref) != len(x):
+        logger.warning("The wavelength grid of this exposure does not have the same length as the reference " +
+                       "exposure. Resizing the current wavelength grid to the reference one...")
+        y = np.interp(x_ref, x, y)
+        y_spec = np.interp(x_ref, x, y_spec)
+        x = np.interp(x_ref, x, x)
+        for spec in spectra:
+            spec.x = x
+            spec.y = y
+    if Stretch:
+        refshift, refstretch, referr = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, stretch=True,
+                                                        fitpeak=t.peak)
+        pixshift = refshift * len(x) / (max(x) - min(x))
+        pixshifterr = referr * len(x) / (max(x) - min(x))
+        logger.info('Applied an xshift of {} pix and stretch of {} percent'.format(pixshift, (1 - refstretch) / 100.) +
+                    'compared to reference (reduced) spectrum {}'.format(t.ref_exp))
+    else:
+        refshift, referr = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, fitpeak=t.peak)
+        pixshift = refshift * len(x) / (max(x) - min(x))
+        pixshifterr = referr * len(x) / (max(x) - min(x))
+        refstretch = 0.
+        logger.info('Applied an xshift of {} pix compared to reference (reduced) spectrum {}'.format(pixshift,
+                                                                                                    t.ref_exp))
+
+
+    if pixshift > 3.:
+        logger.warning('The shift in pixels is rather large. The flat-field on this exposure may not have been' +
+                       'working optimally.')
+    for spec in spectra:
+        if Stretch:
+            spec.x = spec.x / refstretch - refshift
+        else:
+            spec.x -= refshift
+
+
+    if t.debug:
+        ref_ampl = np.trapz(y_ref, x=x_ref)
+        spec_ampl = np.trapz(y_spec, x=spec.x)
+        scale = ref_ampl / spec_ampl
+        p.figure(figsize=(10,10))
+        p.subplot(2, 1, 1)
+        data.plot_data(x=[x_ref, spec.x], y=[y_ref, y_spec * scale], label=['Reference', 'Shifted'],
+                       title='First subexposure shifted to reference', xlabel='Wavelength (micron)',
+                       ylabel='Counts in reference exposure')
+        p.legend()
+
+        p.subplot(2, 1, 2)
+        if t.Zoom_wavelength:
+            x_stellar_line = find_stellar_line(x_ref, y_spec, w_ref1=t.Zoom_wavelength - 0.005,
+                                               w_ref2=t.Zoom_wavelength + 0.005)
+        else:
+            x_stellar_line = find_stellar_line(x_ref, y_spec, w_ref1 = t.telescope.w_ref1, w_ref2=t.telescope.w_ref2)
+        xstart, xend = x_stellar_line - 7, x_stellar_line + 7
+        y_interp = np.interp(x_ref, spec.x, y_spec)
+        data.plot_data(x=[x_ref[xstart:xend], spec.x[xstart:xend], x[xstart:xend], x_ref[xstart:xend]],
+                        y=[y_ref[xstart:xend], y_spec[xstart:xend] * scale,
+                           y_spec[xstart:xend] * scale, y_interp[xstart:xend] * scale],
+                        label=['Reference', 'Shifted', 'Original', 'Interpolated shift'], marker=['o', 'x', 's', '^'])
+        if t.Zoom_wavelength:
+            p.plot([t.Zoom_wavelength, t.Zoom_wavelength], [min(y_ref[xstart:xend]), max(y_ref[xstart:xend])], '--')
+        p.legend()
+        if t.pdf:
+            pdf.savefig()
+            p.close()
+        else:
+            p.show()
+
+
+    return spectra, x_ref, pixshift, pixshifterr
+
+def find_stellar_line(x, y, w_ref1=1.1, w_ref2=1.7):
+    """
+    Find the most apparent stellar line.
+    This is done by searching for the largest one-pixel dip/bump over a mean of 10 pixels around that pixel
+
+    :param x: Wavelengths
+    :param y: Spectrum
+    :param t: Option toggle dict
+    :return: the index of x at which the largest dip/bump occured
+    """
+    #Select the peak:
+    x_peak = x[(x > w_ref1) * (x < w_ref2)]
+    y_peak = y[(x > w_ref1) * (x < w_ref2)]
+
+    index = np.where(x > w_ref1)[0][0]
+    largest_dip = 0
+    largest_dip_x = index
+    for i in range(len(x_peak))[5:-5]:
+        mean = np.mean(y[index + i - 5: index + i + 5])
+        difference = y_peak[i] - mean
+        if abs(difference) > largest_dip:
+            largest_dip = abs(difference)
+            largest_dip_x = index + i
+    return largest_dip_x
+
+def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretch=True):
+    """
+    Match the subexposures to the first/last subexposure depending on scan direction. This is done by shifting the
+    subexposures to the wavelength solution of the first subexposure. One can also stretch/shrink them. This is
+    especially recommended for long scans where the wavelength solution over the CCD may stretch because of optics.
+
+    :param spectra: a list of the spectra of the subexposures
+    :param x_ref: The wavelength solution of the reference image. This is the wavelength-grid on which one interpolates
+                   the spectra. This should be common for all exposures in the visit.
+    :param scan_dir_match: (bool) Does the scan direction match with the scan direction of the reference exposure?
+    :param peak: (bool) Whether to fit only on the peak of the spectrum
+    :param stretch: (bool) Whether to also stretch the spectrum.
+    :return:
+    """
+    if scan_dir_match:
+        #s = len(spectra) - 1
+        #s=2
+        s = 0
+    else:
+        #s = 0
+        #s=1
+        s = len(spectra) - 1
+    sub_shifts = []
+    # Fit for an x offset between subexposures
+    # Take the first sub-exposure as a reference exposure. This one should have been tared to the reference exposure's
+    #  wavelength solution.
+    ref_spec = spectra[s]
+    interp_spectra = []
+    for i,spec in enumerate(spectra):
+        if Stretch and i != s:
+            shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
+                                                   fitpeak=peak)
+            #shifted_y = np.interp(x_ref, spec.x / stretch - shift, spec.y) * stretch
+            shifted_y = np.interp(x_ref, (spec.x - shift) / stretch, spec.y) * stretch
+            #print "shifted", np.mean(np.sqrt((shifted_y/np.mean(shifted_y) - ref_spec.y/np.mean(ref_spec.y))**2.))
+            #new_x = (spec.x - shift)
+            #new_x[]
+            #shifted_y = np.interp(x_ref, new_x, spec.y) * stretch
+            logger.info("Shifted subexposure nr. {} with {}".format(i, shift * len(x_ref) / (max(x_ref) - min(x_ref))) +
+                        " pixels and shrunk {} percent.".format((stretch - 1) * 100.))
+        elif i != s:
+            shift, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
+                                          fitpeak=peak)
+            shifted_y = np.interp(x_ref, spec.x - shift, spec.y)
+            logger.info("Shifted subexposure nr. {} with ".format(i) +
+                        "{} pixels".format(shift * len(x_ref) / (max(x_ref) - min(x_ref))))
+        else:
+            shift, err = 0,0
+            shifted_y = np.interp(x_ref, spec.x, spec.y)
+        interp_spectra.append(shifted_y)
+
+        sub_shifts.append((shift * len(x_ref) / (max(x_ref) - min(x_ref)), err * len(x_ref) / (max(x_ref) - min(x_ref))))
+    return sub_shifts, interp_spectra
 
 # VARIANCE #
 
@@ -187,7 +391,8 @@ def weight_function(coef, x, distn, weights, func_type, method):
         return sum(np.square(weighted))
 
 
-def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, tol, order, i, bg=None, step=None):
+def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, order, i, debug=False, dq_replaced=None,
+               bg=None, step=None, custom_knots=None):
     '''
     Fits a polynomial/gaussian/heavisides to a spatial distribution given some set of outlier
     pixels to ignore.
@@ -201,7 +406,9 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
 
     weights = np.ones_like(P_l)
     #weights[np.logical_or(np.isnan(weights), np.isinf(weights))]= 0
-    weights[ outliers ] = 0 # ignore outlier pixels
+    weights[outliers] = 0 # ignore outlier pixels
+    if dq_replaced is not None:
+        weights[dq_replaced] = 0.5 #Give DQ-flagged pixels a lower non-zero weight.
     weights = weights / np.sum(weights)
     assert np.count_nonzero(V_l<0) == 0, 'Pixels exist with negative variances {}'.format(V_l)
     assert np.count_nonzero(weights<0) == 0, 'Pixels exist with negative weights {}'.format(weights)
@@ -211,15 +418,30 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
         if tol <= 0 or tol is None: tol=len(distn); logger.info('Tolerance set to default in spline fit for column {}'.format(i))
 
         if debug and full_debug: print 'Tolerance set to:', tol
-        if not order: order = 2
+        if not order: order = 3
         if np.all(weights == np.zeros_like(weights)): print 'panic'
 
-        results = UnivariateSpline(x=x,y=distn,w=weights, s=tol, k=order, check_finite=True)
+        #if i == 78: print x, distn, weights
+        order = int(order)
+        if custom_knots is None:
+            results = UnivariateSpline(x=x,y=distn,w=weights, s=tol, k=order, check_finite=True)
+        else:
+            assert len(distn) > custom_knots[-1] + 2, "The custom_knots list contains a too high value "+ \
+                                                      "({}) for this column of length {}".format(custom_knots[-1], len(distn))
+            t = np.array([7.,  14.,  21.,  22.,  23.,  24.,  25.,  26., 27., 28., 29.,  31.,  34.,  40., 47.,  53.,  60.,  66.,  70.,  73.,  76. , 77. , 78. , 79.,  80.,  81., 82., 83., 84.,  86., 91.])
+            #print custom_knots, len(distn)
+            #print t, order
+            results = LSQUnivariateSpline(x=x, y=distn, t=custom_knots, k=order, check_finite=True)
+            #results = LSQUnivariateSpline(x=x, y=distn, t=t, k=order, check_finite=True)
+        #print "knots", results.get_knots()
 
         #if type(results) is None: logger.warning('Fitting has failed to produce a spline')
         fit = my_fns.spline(x, results)
         residual = results.get_residual()
-        success = residual < tol*1.1
+        if custom_knots is None:
+            success = residual < tol*1.1
+        else:
+            success = True
         j = 1
         while not success:
             # Try iterating a few more times
@@ -244,6 +466,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
             print 'Initial P between {:.2g} and {:.2g}'.format(min(P_l), max(P_l))
             print 'Variance between {:.2g} and {:.2g} electrons'.format(min(V_l), max(V_l))
             print 'Weights between {:.2g} and {:.2g}'.format(min(weights), max(weights))
+            print 'Total difference is {}'.format(np.sum(distn-fit))
             fit = my_fns.spline(x, results)
             p.plot(distn, marker='o', ls='None')
             p.plot(fit, color='g')
@@ -258,6 +481,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
         if not tol is None: tol = 40*len(distn)*tol # set the tolerance to n% of the mean flux?
         if tol <= 0 or tol is None: tol=len(distn); logger.info('Tolerance set to default in spline fit for column {}'.format(i))
         if not order: order = 2
+        order = int(order)
 
         n_knots = 2 # start
         res = tol + 1
@@ -379,7 +603,9 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, debug, to
         results = optimize.minimize(weight_function, coef0, args=(x, distn, weights, func_type, method), method=method)
     return results
 
-def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima, M=None, pdf=None, bg_array=None, M_DQ=None, M_CR=None):
+def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima, M=None, pdf=None,
+        bg_array=None, M_DQ=None, M_CR=None, custom_knots=None,
+        outliers_to_average=False, slopefactor=0.1, slope_second_order=False, oe_debug=False):
     '''
     Fit a spatial profile to an image,
     pixels with low variance are weighted higher in the fit to
@@ -423,6 +649,35 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             M_l = M[:,i]
             outliers = np.logical_not(M_l)
 
+        if outliers_to_average:
+            #Look for the pixels around the DQ flagged pixels and assume the scaled average of those pixels if possible
+            dq_replaced = np.zeros_like(distn, dtype=bool)
+            if i != 0 and i != D.shape[1] - 1:
+                column = np.arange(len(D[:,i]))
+                distn_prev = D[:,i-1].copy()
+                distn_prev *= (np.trapz(distn[M_l], column[M_l]) / np.trapz(distn_prev[M[:,i-1]], column[M[:,i-1]]))
+                distn_prev[~M[:,i-1]] = np.nan
+                distn_next = D[:,i+1].copy()
+                distn_next *= (np.trapz(distn[M_l], column[M_l]) / np.trapz(distn_next[M[:,i+1]], column[M[:,i+1]]))
+                distn_next[~M[:,i+1]] = np.nan
+                distn_avg = np.average([distn_prev, distn_next], axis=0)
+                if np.any(np.isnan(distn_avg)) and (i != 1 and i != D.shape[1] - 2):
+                    distn_prev2 = D[:, i - 2].copy()
+                    distn_prev2 *= (np.trapz(distn[M_l], column[M_l]) / np.trapz(distn_prev2[M[:,i-2]], column[M[:,i-2]]))
+                    distn_prev2[~M[:, i - 2]] = np.nan
+                    distn_next2 = D[:, i + 2].copy()
+                    distn_next *= (np.trapz(distn[M_l], column[M_l]) / np.trapz(distn_next2[M[:,i+2]], column[M[:,i+2]]))
+                    distn_next2[~M[:, i + 2]] = np.nan
+                    distn_avg[np.isnan(distn_avg)] = np.average([distn_prev2, distn_next2], axis=0)[np.isnan(distn_avg)]
+                distn[(outliers) & ~np.isnan(distn_avg)] = distn_avg[(outliers) & ~np.isnan(distn_avg)]
+                dq_replaced[(outliers) & ~np.isnan(distn_avg)] = True
+                #print distn_avg
+            #    print outliers
+            #    print dq_replaced
+
+
+
+
         while loop:
             # loop over sigma clipping procedure until can ignore all outlier pixels
             count += 1
@@ -438,20 +693,37 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                 else: fit = True
             else: fit = True
 
+            P_l2 = P_l
+
             if fit:
 
-                #if i == 65: debug = True
-                results = FIT_single(x=x, distn=distn, P_l=P_l, V_l=V_l, outliers=outliers, coef0=coef0, func_type=func_type, method=method, debug=debug, tol=tol, step=step, order=order, bg=bg, i=i)
-                #if i == 65: debug=False
+                if outliers_to_average:
+                    results = FIT_single(x=x, distn=distn, P_l=P_l, V_l=V_l, outliers=outliers, coef0=coef0,
+                                         func_type=func_type, method=method, debug=oe_debug, tol=tol, step=step,
+                                         order=order, bg=bg, i=i, dq_replaced=dq_replaced, custom_knots=custom_knots)
+                    if slope_second_order:
+                        results2 = FIT_single(x=x, distn=distn, P_l=P_l, V_l=V_l, outliers=outliers, coef0=coef0,
+                                          func_type=func_type, method=method, debug=oe_debug, tol=0.01, step=step, order=3,
+                                          bg=bg, i=i, dq_replaced=dq_replaced, custom_knots=custom_knots)
+                else:
+                    results = FIT_single(x=x, distn=distn, P_l=P_l, V_l=V_l, outliers=outliers, coef0=coef0,
+                                         func_type=func_type, method=method, debug=oe_debug, tol=tol, step=step,
+                                         order=order, bg=bg, i=i, custom_knots=custom_knots)
+                    if slope_second_order:
+                        results2 = FIT_single(x=x, distn=distn, P_l=P_l, V_l=V_l, outliers=outliers, coef0=coef0,
+                                          func_type=func_type, method=method, debug=oe_debug, tol=0.01, step=step, order=3,
+                                          bg=bg, i=i, custom_knots=custom_knots)
                 weights = np.divide(np.square(P_l), V_l)
                 weights = weights / np.sum(weights)
 
                 if func_type == 'spline':
                     success, coef = results # this is actually a spline object
+                    if slope_second_order:
+                        success2, coef2 = results2 # this is actually a spline object
                 elif func_type == 'custom_spline':
                     coef, success = results
                 elif func_type == 'split_spline':
-                    coef  = results[:-1]
+                    coef = results[:-1]
                     x = results[-1] # split into 3 parts
                     success = True
                     spline_coefs, m1, c1, m2, c2, x_split = results
@@ -465,7 +737,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     #print success
                 if not success:
                     if func_type != 'spline':
-                        #logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
+                        if i != 0 and np.mean(D[:,i]) > 1000.:
+                            logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
                         fail_list.append(i); fail_type('LINE')
                         P_l = np.ones_like(distn)
                     else:
@@ -478,18 +751,46 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                             P_l = my_fns.spline(x, coef)
                             fail_type.append('PREVIOUS')
                         except (UnboundLocalError, AssertionError): # when this is the first column, use straight line
-                            #logger.info('Optimal extraction fitting failed (col {}), using straight line'.format(i))
-                            resuls = (False, None)
+                            if i != 0 and np.mean(D[:, i]) > 1000.:
+                                logger.warning('Optimal extraction fitting failed (col {}), using straight line'.format(i))
+                            results = (False, None)
                             P_l = np.ones_like(distn)
                             fail_type.append('LINE')
                 else:
                     # this is the updated spatial fit at this wavelength
                     n_success += 1
                     P_l = fn_dict[func_type](x, coef)
+                    if func_type == 'spline' and slope_second_order:
+                        P_l2 = fn_dict[func_type](x, coef2)
+                        On_Slope = np.zeros_like(P_l, dtype=bool)
+                        for j,pl in enumerate(distn):
+                            if j in [0, len(P_l)-1]: continue
+                            if (P_l[j-1] < pl * (1-slopefactor) or P_l[j-1] > (1+slopefactor) * pl) and (pl > 0.1 * max(P_l)):
+                                On_Slope[j-1] = True
+                                On_Slope[j] = True
+                                On_Slope[j+1] = True
+                            if (P_l[j + 1] < pl * (1-slopefactor) or P_l[j + 1] > (1+slopefactor) * pl) and (pl > 0.1 * max(P_l)):
+                                On_Slope[j-1] = True
+                                On_Slope[j] = True
+                                On_Slope[j+1] = True
+                        if success2:
+                            P_l[On_Slope] = P_l2[On_Slope]
+
+                try:
+                    knots = coef.get_knots()
+                except:
+                    knots = [0, len(distn)]
+
 
             # enforce positivity
+            #if i == 91:
+            #    print P_l, "results"
+
+            fct = interp1d(np.arange(len(distn)), P_l)
             P_l[P_l < 0] = 0
             P_l_unscaled = P_l.copy()
+            P_l2_unscaled = P_l2.copy()
+
 
             # If the fit doesn't succeed weight all pixels equally
             # normalization at each wavelength, replace all zeros with equal weighting on good pix
@@ -502,6 +803,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             # update variance
             V_l = estimate_variance(f=f_l, P=P_l, S=S_l, V_0=V_0, Q=Q)
 
+
             if s_clip:
                 new_outliers = clip_sigma(distn, f_l, P_l, S_l, V_l, s_clip)
                 if M is not None:
@@ -510,11 +812,40 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                 new_outliers = outliers
 
             # update spectrum
-            f_l, fV_l = optimized_spectrum(D=distn, S=S_l, P=P_l, V=V_l, M=M_l)
+
+            f_l, fV_l = optimized_spectrum(D=distn, S=S_l, P=P_l, V=V_l, M=M_l, debug = False)
+
+            showlist = [D.shape[1] / 2, D.shape[1] / 2 + 1]
+            showlist.append(92)
+            if (custom_knots is None and debug) and i in showlist:
+                #print P_l_unscaled - P_l2_unscaled, order
+                print f_l, "pl", np.sum(f_l), np.sum(distn) / np.max(distn)
+                print "Knots estimated by pipeline are:", knots
+                #print P_l_unscaled
+                xjes = np.arange(len(distn))
+                if slope_second_order:
+                    print np.arange(len(distn))[On_Slope]
+                    print custom_knots
+                    p.plot(xjes[On_Slope], distn[On_Slope], 'o', color='g', label='slope')
+                    p.plot(xjes[(M.T[i].astype(bool)) & ~(On_Slope)], distn[(M.T[i].astype(bool)) & ~(On_Slope)], 'o', color='b')
+                else:
+                    p.plot(xjes[M.T[i].astype(bool)], distn[M.T[i].astype(bool)], 'o', color='b')
+                p.plot(xjes[~M_DQ.T[i].astype(bool)], distn[~M_DQ.T[i].astype(bool)], 'o', color='k', label='DQ')
+                p.plot(xjes[~M_CR.T[i].astype(bool)], distn[~M_CR.T[i].astype(bool)], 'o', color='r', label='CR')
+                p.plot(knots, fct(knots), 'o', color='y', label='knots')
+                if outliers_to_average:
+                    p.plot(xjes[dq_replaced], distn[dq_replaced], 'o', color='c', label='replaced DQ/CR')
+                p.plot(P_l_unscaled)
+                #p.plot(P_l2_unscaled)
+                p.legend()
+                p.title(i)
+                p.show()
+                #print V_l, "vl"
 
             # Plots, if wanted
-            if np.array_equal(new_outliers, outliers) or count > 30:
-                if (debug and i % 1 == 0) or (pdf and i % 2 == 0): # just puts limits on the numbers (and max(distn) > 1000)
+
+            if np.array_equal(new_outliers, outliers) or count > 30 and False:
+                if (oe_debug and i % 1 == 0) or (pdf and i % 2 == 0): # just puts limits on the numbers (and max(distn) > 1000)
                     n_figs += 1
                     p.subplot(2,2,n_figs)
 
@@ -608,7 +939,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             else:
                 outliers = new_outliers
                 # and loop
-        if debug:
+
+        if oe_debug:
             logger.info('Stored {} figures to pdf file'.format(n_figs))
 
         old_results = results
@@ -616,25 +948,40 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         # store results in the original arrays
         P[:,i] = P_l.copy()
         V[:,i] = V_l.copy()
+        if f_l > 3.e6 and False:
+            p.plot(P_l / np.median(P_l) * np.median(distn))
+            print M_DQ[:,i].astype(bool)
+            print M_CR[:,i].astype(bool)
+            Good = M_DQ[:,i].astype(bool)
+            Good[np.logical_not(M_CR[:,i].astype(bool))] = False
+            Bad = np.logical_not(Good)
+            p.plot(distn[Good], 'o', color='b')
+            p.plot(distn[Bad], 'o', color='r')
+            p.title('column {}'.format(i))
+            p.show
         f[i] = f_l
         fV[i] = fV_l
+
+        #fail_list.extend([90,91,92])
         if i in fail_list and i != 0 and np.mean(D[:,i]) > 1000.: #Extraction failed in a column that is not part of the background
             D_col = D[:,i]
+            print f[i]
             D_col1 = D[:,i-1]
             Good = M_DQ[:,i].astype(bool)
             Bad = np.logical_not(M_DQ[:,i].astype(bool))
             fig = p.figure()
             p.subplot(211)
-            p.scatter(np.arange(len(D_col[Good])), D_col[Good] - D_col1[Good], color='b', label='Good pixels')
-            p.scatter(np.arange(len(D_col[Bad])), D_col[Bad] - D_col1[Bad], color='r', label='Bad pixels')
+            p.scatter(np.arange(len(D_col))[Good], D_col[Good] - D_col1[Good], color='b', label='Good pixels')
+            p.scatter(np.arange(len(D_col))[Bad], D_col[Bad] - D_col1[Bad], color='r', label='Bad pixels')
             p.title('Pixel values of column {} (for which fitting failed) compared to column {}'.format(i, i-1))
             p.ylabel('Column {} - Column {}'.format(i,i-1))
-            p.legend()
             p.subplot(212)
-            p.scatter(np.arange(len(D_col[Good])),D_col[Good], color='b')
-            p.scatter(np.arange(len(D_col[Bad])),D_col[Bad], color='r')
+            p.plot(np.arange(len(P_l_unscaled)), P_l_unscaled, label='Assumed fit')
+            p.scatter(np.arange(len(D_col))[Good],D_col[Good], color='b')
+            p.scatter(np.arange(len(D_col))[Bad],D_col[Bad], color='r')
             p.ylabel('Column {}'.format(i))
             fig.subplots_adjust(hspace=0)
+            p.legend()
             p.show()
 
     if n_success/float(n_fits) >= 0.9:
@@ -672,7 +1019,10 @@ def medfilt (x, k):
 
 # RUN ALGORITHM #
 
-def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None, pdf_file=None, skip_fit=False, bg=None, fit_dq=False, fit_cr=False, logger=None):
+def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='spline', method='lsq', oe_debug=False,
+                     debug=False, tol=None, step=None, order=2, M_DQ=None, M_CR=None, k_col=None, k_row=None,
+                     pdf_file=None, skip_fit=False, bg=None, fit_dq=False, fit_cr=False, custom_knots=None,
+                     outliers_to_average=False, slopefactor=0.1, slope_second_order=False, logger=None):
     '''
     Extract spectrum using either a poly or gauss fit.
     Toggle cosmic ray removal by setting s_cosmic to None or
@@ -788,7 +1138,10 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
 
     # find spatial profile and variance estimatesTrue
     # can not use M mask for this fit, have already smoothed and interpolated bad pixels
-    P, V, f, fV = FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima=origima, M=M, pdf=pdf, bg_array=bg, M_DQ=M_DQ, M_CR=M_CR)
+    P, V, f, fV = FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, order, origima=origima,
+                      M=M, pdf=pdf, bg_array=bg, M_DQ=M_DQ, M_CR=M_CR, custom_knots=custom_knots,
+                      outliers_to_average=outliers_to_average, slopefactor=slopefactor,
+                      slope_second_order=slope_second_order, oe_debug=oe_debug)
     #V = estimate_variance(f=f, P=P, S=S, V_0=V_0, Q=Q)
 
     n, loop = 0, True
@@ -829,7 +1182,7 @@ def extract_spectrum(D, S, V_0, Q, V=None, s_clip=16, s_cosmic=25, func_type='sp
     # so as to not actually include bad pixels in the final results use M mask
     f, fV = optimized_spectrum(origima, S, P, V, M_true)
 
-    if debug:
+    if oe_debug:
         p.subplot(2,1,1)
         p.plot(f)
         p.ylabel('Flux')

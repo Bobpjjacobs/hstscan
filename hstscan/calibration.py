@@ -243,8 +243,12 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
         p.ylabel('Spatial pixel')
         p.legend(loc=4)
         p.show()
+    #print "trace", trace_l
+    #print "X", X
+    #print "Y", Y
     WAVELENGTHS = function(trace_l, X, Y, DISP_COEFFS) / 10000  # units of micrometers from Angstroms
     # view(WAVELENGTHS, title='Dispersion solution')
+    #print WAVELENGTHS
     return WAVELENGTHS, TRACE
 
 

@@ -13,6 +13,7 @@ from scipy.optimize import leastsq
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 
 view = data.view_frame_image
 
@@ -74,6 +75,7 @@ def create_sub_exposure(read1, read2, read_noise=20, nlincorr=False,
     Perform non-linearity correction for saturated pixels (since they are excluded from the default calibration)
     """
     if nlincorr:  # perform non-linearity correction for saturated pixels
+        # This should have already been done for _ima files by calwf3
 
         # If we use the saturation flag from the DQ info, will double correct
         # sat1 = (read1.DQ.data/256 % 2).astype(bool) # 256 is the flag for saturation
@@ -111,6 +113,10 @@ def create_sub_exposure(read1, read2, read_noise=20, nlincorr=False,
     assert read1.trimmed == read2.trimmed, 'Reads should both include/not include reference pixels'
     return sub
 
+
+########################################
+#              Backgrounds             #
+########################################
 
 def calc_subexposure_background(subexposure, method='median', debug=False, masks=0, psf_w=200, psf_h=None, neg_masks=0,
                                 xpix=None, show=True, mask_h=40, **kwargs):
@@ -431,6 +437,60 @@ def calc_image_background(image, box_h, psf_h, debug=False, above=False):
     return full_bg  # array
 
 
+def background_removal(i, subexposure, t, logger=None):
+    if t.bg:
+        if t.bg_area:
+            # Using a fixed area of the detector to calculate bg mean
+            i_size_y, i_size_x = subexposure.SCI.data.shape
+            t.bg_x, t.bg_y, t.bg_h, t.bg_w = map(int, [t.bg_x, t.bg_y, t.bg_h, t.bg_w])
+            if np.any([t.bg_y > i_size_y,t.bg_y + t.bg_h > i_size_y, t.bg_x > i_size_x, t.bg_x + t.bg_w > i_size_y]):
+                raise ValueError("Your background extraction box does not fit inside the image")
+            bg_mask = np.zeros_like(subexposure.SCI.data)
+            bg_mask[t.bg_y:t.bg_y + t.bg_h, t.bg_x:t.bg_x + t.bg_w] = 1
+            bg_image = subexposure.SCI.data[np.array(bg_mask.astype(bool))]
+            bg_image = bg_image[np.isfinite(bg_image)]
+            bg_image = bg_image.reshape((t.bg_h, t.bg_w))
+
+            bg_dq_mask = subexposure.mask[np.array(bg_mask.astype(bool))]
+            CR_clean, CR_mask, CR_info = spatial_median_filter(bg_image, bg_dq_mask.reshape((t.bg_h, t.bg_w)))
+
+            bg, bg_err = np.nanmedian(bg_image[~CR_mask]), np.nanstd(bg_image[~CR_mask])
+        else:
+            # Using masks for spectrum and background stars
+            if t.scanned:
+                psf_h = None
+            else:
+                psf_h = t.psf_h
+            bg, bg_err = calc_subexposure_background(subexposure, method='median', masks=t.n_masks, \
+                                                       debug=t.bg_plot, neg_masks=t.neg_masks, mask_h=t.mask_h,
+                                                       psf_w=t.psf_w, psf_h=psf_h, show=not t.pdf)
+            if t.bg_plot and False:
+                p.subplot(1, 2, 1)
+                p.title('Subexposure {}'.format(i))
+                save_fig()
+            t.bg_plot = False
+
+        bg = np.ones_like(subexposure.SCI.data) * bg
+        if logger:
+            # logger.info('Background median found to be {} electrons per pixel'.format(np.nanmedian(bg)))
+            if np.nanmedian(bg) > 50:
+                logger.warning(
+                    'Large background of {} electrons per pixel found in subexposure {}'.format(np.nanmedian(bg), i))
+            elif np.nanmedian(bg) == 0.:
+                logger.warning('Background of 0 electrons per pixel found in subexposure {}'.format(i + 1))
+    else:
+        # No background removal
+        bg = np.zeros_like(subexposure.SCI.data)
+        bg_err = 0.
+    subexposure.SCI.data -= bg
+    subexposure.bg = bg
+    subexposure.bg_err = bg_err
+    subexposure.SCI.header['BG'] = np.median(bg)
+    subexposure.SCI.header['BG_ERR'] = bg_err
+
+    return subexposure, bg_mask
+
+
 ########################################
 #             Blob removal             #
 ########################################
@@ -485,7 +545,8 @@ def has_blobs(mask, tol=4):
 ########################################
 
 
-def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', debug=False, mask_dq=False, thresh=50.):
+def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='median', debug=False, mask_dq=False,
+                          thresh=50., hard_e_limit=1.e9):
     """
     Filter cosmic rays by using a local median of pixels
     First compute median in x and y, using sx and sy number of pixels either side
@@ -494,15 +555,14 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
 
     Can input an array of pixels to ignore when checking for cosmic rays (dq_mask, bool)
 
-    Thresh is pixel level threshold before it can be called a CR (in elecrons), not used
+    Thresh is pixel level threshold before it can be called a CR (in elecrons)
     """
-
     masks = [];
     medimages = []
     ress = [];
     stds = []
     # For each axis (y, x direction)
-    for axis, shift in zip([0, 1], [sy, sx]):
+    for axis, shift, tol in zip([0, 1], [sy, sx], [toly, tolx]):
         if shift != 0:
             # Find the local pixels median and std
             image_stacks = []
@@ -511,12 +571,24 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
                 new_image = np.roll(image, sh, axis=axis)
                 image_stacks.append(new_image)
             medimage = np.nanmedian(image_stacks, axis=0)
-            stdimage = np.nanstd(image_stacks, axis=0)
+            stdimage = np.sqrt(np.nanmedian((image_stacks - medimage)**2., axis=0))
+            #stdimage = np.nanstd(image_stacks, axis=0)
 
-            # check if pixels are outliers
-            residuals = np.abs(image - medimage)
+
+            # check if pixels are positive outliers
+            residuals = image - medimage #np.abs(image - medimage)
+            #data.view_frame_image(residuals[50:100,70:120])
+            #data.view_frame_image((tol * stdimage)[50:100,70:120])
+            #data.view_frame_image(image[50:100,150:200]**5.)
+            #data.view_frame_image(residuals[50:100,150:200])
+            #data.view_frame_image((tol * stdimage)[50:100,150:200])
+            #data.view_frame_image(np.abs(residuals) - tol * stdimage, vmin=0.)
             mask = np.abs(residuals) > tol * stdimage
             mask = np.logical_and(mask, residuals > thresh)
+            mask = np.logical_or(mask, image > hard_e_limit)
+            #p.imshow(mask[50:100,70:120], origin='lower')
+            #p.imshow(mask[50:100,150:200], origin='lower')
+            #p.show()
             masks.append(mask);
             medimages.append(medimage)
             ress.append(residuals);
@@ -525,7 +597,8 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
             mask = np.zeros_like(image)
             masks.append(mask)
 
-    mask = np.logical_or(masks[0], masks[1])  # flag if either are flagged
+    #mask = np.logical_or(masks[0], masks[1])  # flag if either are flagged
+    mask = np.logical_and(masks[0], masks[1])  # flag if both are flagged
     if not mask_dq: mask[dq_mask] = False  # dont want to count DQ pixels as CRs
     if replace == 'median':
         replace = np.mean(medimages, axis=0)
@@ -553,22 +626,24 @@ def spatial_median_filter(image, dq_mask, tol=5, sx=5, sy=5, replace='median', d
 # fit a 40 pixel tall box in space over the spectrum
 # maximize area within box to find spectrum and fit box
 
-def box_cut(pix, image, h=40, horizontal=False, force_shape=True):
+def box_cut(pix, image, h=40, horizontal=False, force_shape=True, override1=False, override2=False):
     if horizontal: image = image.T
     pix = int(pix)
-    if pix < h / 2:
+    if pix < h / 2 and not override1:
         if force_shape == True:
             box = image[:h]
         else:
+            #box = image[-h:]
             box = image[:pix + h / 2]
-    elif len(image) - pix < h / 2:
+    elif len(image) - pix < h / 2 and not override2:
         if force_shape == True:
             box = image[-h:]
         else:
             box = image[pix - h / 2:]
     else:
         box = image[pix - h / 2:pix + h / 2]
-    if horizontal: box = box.T
+    if horizontal:
+        box = box.T
     return box
 
 
@@ -617,8 +692,6 @@ def find_box(source_image, h=40, sign='p', refine=False):
 # 				  and stretch		  	     #
 ##############################################
 
-from scipy.optimize import curve_fit
-
 
 def spec_pix_shift2(template_x, template_y, x_new, y_new, norm=True, interp_template=True, p0=0.01, **kwargs):
     """
@@ -644,8 +717,6 @@ def spec_pix_shift2(template_x, template_y, x_new, y_new, norm=True, interp_temp
     out = curve_fit(func, template_x, ref_y, p0=(p0), **kwargs)
     shift = out[0][0]
     err = np.diag(np.sqrt(out[1]))[0]
-
-    # assert success, 'Fitting failed'
     return shift, err
 
 def spec_pix_shift(template_x, template_y, x_new, y_new, norm=True, interp_template=True, p0=0.01, fitpeak=False,
@@ -675,10 +746,12 @@ def spec_pix_shift(template_x, template_y, x_new, y_new, norm=True, interp_templ
         template_x = template_x[Peak]
         x_new = x_new[Peak]
 
+
     def func(x, shift):
         return np.interp(x, x_new + shift, interp_y)
 
     def func_stretch(x, shift, stretch):
+        #x_new[(x_new > 0.8) & (x_new < 1.8)] = (x_new[(x_new > 0.8) & (x_new < 1.8)] - 0.8) * stretch + 0.8
         return np.interp(x, x_new * stretch + shift, interp_y)
 
     if stretch:
@@ -702,13 +775,15 @@ def spec_pix_shift(template_x, template_y, x_new, y_new, norm=True, interp_templ
 
 
 
-def find_xshift_di(exposure, subexposure, direct_image, options, wave_grid, cal_disp_poly_args, plot, fitpeak=False):
+def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_poly_args, tsiaras_args, plot, fitpeak=False):
     """
     Given an image (with spectrum) and a stellar spectrum it computes the shift in x compared to the direct image.
     This is done by comparing the subexposure spectrum (subtracted by a stellar spectrum) to the grism response function
 
-    The average xshift is best calculated on the average subexposure. This subexposure should have already been
+    The average xshift is best calculated on the first subexposure. This subexposure should have already been
      background subtracted
+
+    In the case we have a zeroth order spectrum in the image (when image size is 512x512), we need to "remove" this.
 
     :param wave_grid: numpy 1d array with a first estimate of the wavelength grid.
     :return:
@@ -716,26 +791,25 @@ def find_xshift_di(exposure, subexposure, direct_image, options, wave_grid, cal_
 
     Data = subexposure.SCI.data
     flux = np.nansum(Data, axis=0)
+
+    #Remove zeroth order spectrum
+    if len(flux) == 512:
+        flux[:150] = 0
+
     if fitpeak:
         Peakbool = flux > 0.7 * max(flux)
     else:
         Peakbool = np.ones(len(flux), dtype=bool)
 
-    conf_file = options['conf_file_g141']
-    trans_file = options['trans_file_g141']  # Grism response function file
-    stellar_file = options['stellar_spectrum']
-
-    F = pyfits.open(trans_file)
+    F = pyfits.open(t.trans_file_g141)
     Sensitivity = F[1].data['SENSITIVITY']
     Sensitivity_W = F[1].data['WAVELENGTH'] / 10000.  # Converted to microns
     f_sens = interp1d(Sensitivity_W, Sensitivity, bounds_error=False, fill_value=0.)
 
-    BEAM, DISP_COEFFS, TRACE_COEFFS = disp.get_conf_coeffs(WFC_conf_file=conf_file)
-    di_image_distance = BEAM[0]
-
     Fitsmodel = False
     try:
-        stellar_file = pyfits.open(stellar_file)[0]
+        stellar_file = pyfits.open(t.stellar_spectrum)[0]
+        stellar_W = pyfits.open(t.stellar_wavelengths)[0].data / 10000. #transform to microns.
         Fitsmodel = True
     except:
         print "The stellar file is not a PHOENIX model."
@@ -747,62 +821,64 @@ def find_xshift_di(exposure, subexposure, direct_image, options, wave_grid, cal_
             print "Please have a good look at the below plot and check the stellar spectrum."
             plot = True
         stellar_spec = stellar_file.data
-        # The resolution of the stellar spectrum is too high, so we apply a guassian kernel of ±20 Angstrom
+        # The resolution of the stellar spectrum is too high, so we apply a guassian kernel of 20 Angstrom
         if len(stellar_spec)>10000:
-            stellar_spec = gaussian_filter(stellar_spec, sigma=len(stellar_spec) / 1000.)
-        stellar_W = np.linspace(0.3, 2.4, len(stellar_spec))
+            stellar_spec = gaussian_filter(stellar_spec, sigma=t.stel_spec_gauss_kern_sig * 200.)
     else:
         print "Not using a PHOENIX model but a different model."
         print "Please have a good look at the below plot and check the stellar spectrum."
         plot = True
-        stellar_file = np.genfromtxt(stellar_file, skip_header=1)
+        stellar_file = np.genfromtxt(t.stellar_spectrum, skip_header=1)
         stellar_W = stellar_file.T[0] / 10000. #transform to microns.
         stellar_spec = stellar_file.T[1]
     Scale = max(stellar_spec) / max(flux)
-    f_stellar = interp1d(stellar_W, stellar_spec / Scale, bounds_error=False)
+    f_stellar = interp1d(stellar_W, stellar_spec / Scale, bounds_error=False, fill_value=0.)
 
-    c, catalogue, subexp_time, e, scan_direction, a, L, L, XOFF, YOFF, d, b, x_di, ymid = tuple(cal_disp_poly_args)
+    c, catalogue, subexp_time, e, scan_direction, a, L, L, XOFF, YOFF, d, b, x_di, ymid, disp_coef = tuple(cal_disp_poly_args)
+    L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, grid_y, grid_lam, x_di, conf_file, contam_thresh = tsiaras_args
 
-    Bounds = ([-250., -50.], [50., 0.])
-    p0 = [-120., -10.]
+    if L == 256:
+        #p0 = [-120., -16.]
+        #Bounds = ([-300., -50.], [50., 0.])
+        p0 = [30., -16.]
+        Bounds = ([-300., -50.], [250., 0.])
+        p0_t = [-121., -15.25]
+        Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
+    else:
+        p0 = [-20., -15.]
+        Bounds = ([-100., -50.] , [150., 0.])
+        p0_t = [0., -14.5]
+        Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
 
-    #126.5 -> 127.5
-    #124.6 -> 124.6
-    #124.9 -> 125.4
-    Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, Peakbool)
+    Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure)
     opt, cov = Object.fit(wave_grid[0][Peakbool], flux[Peakbool], Bounds, p0)
     displacement, amplitude = opt
-    displacement_err, amplitude_err = np.diag(cov)
+    displacement_err, amplitude_err = np.sqrt(np.diag(cov))
 
 
-    #displacement_pix =
-    # amplitude = -24.5
     wave_grid_new, trace_new = cal.disp_poly(c, catalogue, subexp_time, e,
                                      scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                      data_dir=d, debug=False, x=x_di + displacement,
-                                     y=ymid)
+                                     y=ymid, disp_coef=disp_coef)
 
     Calculated = 10 ** (amplitude) * f_sens(wave_grid_new[0]) * f_stellar(wave_grid_new[0])
-    """
-    print ("sum sq. residuals", np.sqrt(np.sum((Calculated - flux)**2.)), "for displacement", displacement)
 
 
-    displacement2 = -122.635
-    # amplitude = -24.5
-    wave_grid_new2, trace_new = cal.disp_poly(c, catalogue, subexp_time, e,
-                                     scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
-                                     data_dir=d, debug=False, x=x_di + displacement2,
-                                     y=ymid)
+    #waves_tsiaras = np.linspace(t.ref_wv0, t.ref_wv1, 200)
 
-    Calculated2 = 10 ** (amplitude) * f_sens(wave_grid_new2[0]) * f_stellar(wave_grid_new2[0])
-    print ("sum sq. residuals", np.sqrt(np.sum((Calculated2 - flux)**2.)), "for displacement", displacement2)
-    """
+
+
+
+
+
 
     if plot:
         fig = p.figure(figsize=(10, 10))
         p.subplot(211)
         p.plot(wave_grid_new[0], flux, label='Exposure')
         p.plot(wave_grid_new[0], Calculated, label='Fit')
+        #p.plot(waves_tsiaras, Total_ts, label='Tsiaras')
+        #p.plot(waves_tsiaras, Calculated_t, label='Fit to Tsiaras')
         p.ylabel('Electrons')
         p.legend()
         p.title("With a shift of xshift={}".format(displacement))
@@ -819,11 +895,13 @@ def find_xshift_di(exposure, subexposure, direct_image, options, wave_grid, cal_
 
 
 class spectrum_fit:
-    def __init__(self, f_sens, f_stellar, cal_disp_poly_args, Peakbool):
+    def __init__(self, f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure):
         self.f_sens = f_sens
         self.f_stellar = f_stellar
         self.c = cal_disp_poly_args
+        self.c_t = tsiaras_args
         self.Peakbool = Peakbool
+        self.subexposure = subexposure
 
     def fitting_fn2(self, wave_grid, displacement, amplitude):
         Total = 10.**amplitude * self.f_sens(wave_grid + displacement) * self.f_stellar(wave_grid + displacement)
@@ -834,15 +912,39 @@ class spectrum_fit:
         return opt, cov
 
     def fitting_fn(self, wave_grid, displacement, amplitude):
-        a, catalogue, subexp_time, b, scan_direction, d, L, L, XOFF, YOFF, e, f, x_di, ymid = self.c
+        a, catalogue, subexp_time, b, scan_direction, d, L, L, XOFF, YOFF, e, f, x_di, ymid, disp_coef = self.c
         wave_grid, trace = cal.disp_poly(a, catalogue, subexp_time, b,
                                          scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
-                                         data_dir=e, debug=False, x=x_di + displacement, y=ymid)
+                                         data_dir=e, debug=False, x=x_di + displacement, y=ymid, disp_coef=disp_coef)
         Total = 10.**amplitude * self.f_sens(wave_grid[0][self.Peakbool]) * self.f_stellar(wave_grid[0][self.Peakbool])
-        return Total**2.
+        return Total
+
+    def fitting_fn_tsiaras(self, waves, displacement, amplitude):
+        L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, grid_y, grid_lam, x_di, conf_file, contam_thresh = self.c_t
+        x_t = x_di + displacement
+        wave_grid = disp.dispersion_solution(x0=x_t, L=L, Dxoff=XOFF, Dxref=Dxref,
+                                             ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS,
+                                             TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=grid_y,
+                                             wdpt_grid_lam=grid_lam,
+                                             WFC_conf_file=conf_file)
+
+        cut_image = self.subexposure.SCI.data[ystart:yend, int(x_t):int(x_t) + 200]
+        cut_mask = self.subexposure.mask[ystart:yend, int(x_t):int(x_t) + 200]
+        interp_image, interp_mask = disp.interp_wave_grid_sane(waves, wave_grid, cut_image, cut_mask, tol=contam_thresh)
+
+        Total = np.nansum(interp_image, axis=0)
+        Expected = 10.**amplitude * self.f_sens(waves) * self.f_stellar(waves)
+        return Total - Expected
 
     def fit(self, wave_grid, flux, Bounds, P0):
-        opt, cov = curve_fit(self.fitting_fn, wave_grid, flux**2., bounds=Bounds, p0=P0)
+        opt, cov = curve_fit(self.fitting_fn, wave_grid, flux, bounds=Bounds, p0=P0)
+        p.plot(wave_grid, flux)
+        p.plot(wave_grid, self.fitting_fn(wave_grid, opt[0], opt[1]))
+        p.show()
+        return opt, cov
+
+    def fit_tsiaras(self, waves, Bounds, P0):
+        opt, cov = curve_fit(self.fitting_fn_tsiaras, waves, np.zeros(200), bounds=Bounds, p0=P0)
         return opt, cov
 #######################
 #        Other        #
@@ -951,33 +1053,34 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
         params.fp = 1e-4  # secondary eclipse depth, wave/temp dependent
     elif system == 'WASP-80':
-        # Below are rough paramaters for WASP-80b system
-        per = 3.0678504
-        params.t0 = 2454664.90531
+        # Below are rough paramaters for WASP-80b system Based on Sedaghati et al. 2017 unless otherwise stated
+        per = 3.067860  ##Parvianien et al. 2017 Period [days]
+        params.t0 = 2456459.809578  # Central time of PRIMARY transit BJD [days]
         # From Triaud paper 2454664.90531 -0.00016/+0.00017  BJD
         params.per = per  # orbital period
-        params.rp = 0.167444  # Rp/Rs, mean 0.0142
-        params.a = 12.97545  # semi-major axis (a/Rs), mean 2.0
-        params.inc = 89.92  # orbital inclination (in degrees)
-        params.ecc = 0.02  # eccentricity
         params.w = 94.  # longitude of periastron (in degrees)
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.55]  # stellar limb darkening coefficients
-        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
-        params.fp = 5e-4  # secondary eclipse depth, wave/temp dependent
+        params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
         params.Hmag = 8.513
+        params.a_abs = 0.0321  # The absolute value of the semi-major axis [AU]
+        params.inc = 88.90  # Inclination [degrees]
+        params.ecc = 0.002  ##Triaud Eccentricity
+        params.rp = 0.17386  # Planet to star radius ratio
+        params.a = 12.0647  # Semi-major axis scaled by stellar radius
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'HAT-P-2':
-        # Below are rough paramaters for HAT-P-2 b system
-        per = 5.6334729
-        params.t0 = 0.  # 2455288.84923
-        params.t_secondary = 2455289.93211 - 2455288.84923
-        params.t_periapse = 2455289.4721 - 2455288.84923
+        # Below are rough paramaters for HAT-P-2 b system from https://arxiv.org/pdf/1702.03797.pdf
+        per = 5.6334675#5.6334729
+        params.t0 = 2455288.84969  # 2455288.84923
+        #params.t_secondary = 2455289.93211 - 2455288.84923
+        #params.t_periapse = 2455289.4721 - 2455288.84923
         params.per = per  # orbital period
         params.rp = 0.07695  # Rp/Rs, mean 0.0142
         params.a = 9.72  # semi-major axis (a/Rs), mean 2.0
         params.inc = 86.7  # orbital inclination (in degrees)
-        params.ecc = 0.5171  # eccentricity
-        params.w = 185.22  # longitude of periastron (in degrees)
+        params.ecc = 0.51023#0.5171  # eccentricity
+        params.w = 188.44#185.22  # longitude of periastron (in degrees)
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.55]  # stellar limb darkening coefficients
         params.t_secondary = 55289.4734 - 55288.84988  # from https://arxiv.org/pdf/1302.5084.pdf
@@ -1056,13 +1159,207 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.t0 = 2456196.28934
         params.t_secondary = params.t0 + per / 2.
         params.per = per  # orbital period
-        params.rp = 0.714 * cs.R_jup.value / (1.162 * cs.R_sun.value)  # Rp/Rs, mean 0.0142
+        params.rp = 1.38 * cs.R_jup.value / (1.162 * cs.R_sun.value)  # Rp/Rs, mean 0.0142
         params.a = 0.04747 * cs.au.value / (1.162 * cs.R_sun.value)  # semi-major axis (a/Rs)
         params.inc = 86.59  # orbital inclination (in degrees)
         params.ecc = 0.  # eccentricity
         params.w = 83.  # longitude of periastron (in degrees)
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.28]  # stellar limb darkening coefficient
+        params.Teq = 1446
+    elif system == 'KELT-9':
+        #### Following Borsa et al. 2019: https://arxiv.org/pdf/1907.10078.pdf
+        # G: Following Gaudi et al. 2017: https://arxiv.org/pdf/1706.06723.pdf
+        # A: Following Ahlers et al. 2020: https://arxiv.org/abs/2004.14812
+        # W: Following Wong et al. 2020: https://arxiv.org/abs/1910.01607
+        per = 1.4811235  #W #Most precise
+        params.t0 = 2458711.58627  #W #Newest
+        params.per = per  # orbital period
+        params.w = 90.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "linear"  # limb darkening model #don't care
+        #params.u = [0.55]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 7.492  #Simbad
+        params.a_abs = 0.03547  # The absolute value of the semi-major axis [AU]
+                                # Calculated from a/Rs from #W and Rs from #A. Is most precise measurement and best method
+                                # 3sigma 0.03463
+        params.inc = 87.2  #A Best method and more precise than #W  #3sigma: 85.41#
+        params.ecc = 0.0  #W Eccentricity
+        params.rp = 0.081  #A Best method  #3sigma 0.087#
+        params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+        """
+        # Following Ahlers et al. (2020) (incl. grav. darkening): https://arxiv.org/pdf/2004.14812.pdf
+        per = 1.4811224  ##Parvianen et al. 2017 Period [days]
+        params.t0 = 2458683.4449  # Central time of PRIMARY transit BJD [days]
+        params.per = per  # orbital period
+        params.w = 90.  # longitude of periastron (in degrees)
+        params.limb_dark = "linear"  # limb darkening model
+        #params.u = [0.55]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 7.492
+        params.a_abs = 0.03368  # The absolute value of the semi-major axis [AU]
+        params.inc = 87.2  # Inclination [degrees]
+        params.ecc = 0.0  ##Triaud Eccentricity
+        params.rp = 0.081  # Planet to star radius ratio
+        params.a = 2.99515  # Semi-major axis scaled by stellar radius
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+        """
+    elif system == 'WASP-47b':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 4.160666
+        params.t0 = 2456982.978187
+        params.per = per  # orbital period
+        params.w = 3.747  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.5319, 0.0897]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 10.310  #Simbad
+        params.a_abs = 0.050918  # The absolute value of the semi-major axis [AU]
+        params.inc = 88.927  # Inclination
+        params.ecc = 0.0038  # Eccentricity
+        params.rp = 0.102036  # Best method
+        params.a = 9.6901  # Semi-major axis scaled by stellar radius
+        params.Teq = 1499
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'WASP-47d':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 9.09585
+        params.t0 = 2456988.37565
+        params.per = per  # orbital period
+        params.w = 4.655  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.5319, 0.0897]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 10.310  #Simbad
+        params.a_abs = 0.085769  # The absolute value of the semi-major axis [AU]
+        params.inc = 90.839  # Inclination
+        params.ecc = 0.00752  # Eccentricity
+        params.rp = 0.029264  # Best method
+        params.a = 16.3223  # Semi-major axis scaled by stellar radius
+        params.Teq = 1158
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'WASP-47e':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 0.7896264
+        params.t0 = 2456979.765020
+        params.per = per  # orbital period
+        params.w = 84.92  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.5319, 0.0897]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 10.310  #Simbad
+        params.a_abs = 0.016816  # The absolute value of the semi-major axis [AU]
+        params.inc = 91.82  # Inclination
+        params.ecc = 0.0160  # Eccentricity
+        params.rp = 0.014328  # Best method
+        params.a = 3.2001  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 2608
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'V1298b':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 24.141106
+        params.t0 = 2457067.049293
+        params.per = per  # orbital period
+        params.w = 85.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46,0.11]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.191  #Simbad
+        params.a_abs = 0.1688  # The absolute value of the semi-major axis [AU]
+        params.inc = 89.517  # Inclination
+        params.ecc = 0.087  # Eccentricity
+        params.rp = 0.0700  # Best method
+        params.a = 30.06  # Updated from Spizter Semi-major axis scaled by stellar radius
+        params.Teq = 677
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'V1298c':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 8.249141
+        params.t0 = 2457064.281606
+        params.per = per  # orbital period
+        params.w = 92.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46,0.11]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.191  #Simbad
+        params.a_abs = 0.0825  # The absolute value of the semi-major axis [AU]
+        params.inc = 88.49  # Inclination
+        params.ecc = 0.  # Eccentricity
+        params.rp = 0.0381  # Best method
+        params.a = 13.19  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 968
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'V1298d':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 12.401623
+        params.t0 = 2457072.399035
+        params.per = per  # orbital period
+        params.w = 88.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46,0.11]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.191  #Simbad
+        params.a_abs = 0.1083  # The absolute value of the semi-major axis [AU]
+        params.inc = 89.04  # Inclination
+        params.ecc = 0.  # Eccentricity
+        params.rp = 0.0436  # Best method
+        params.a = 17.31  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 845
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'V1298e':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 60
+        params.t0 = 2457096.6229
+        params.per = per  # orbital period
+        params.w = 91  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46,0.11]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.191  #Simbad
+        params.a_abs = 0.308  # The absolute value of the semi-major axis [AU]
+        params.inc = 89.4  # Inclination
+        params.ecc = 0.  # Eccentricity
+        params.rp = 0.0611  # Best method
+        params.a = 51.  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 492
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'TOI-1130b':
+        #https://arxiv.org/pdf/1610.09533.pdf
+        per = 4.066499
+        params.t0 = 2458658.74627
+        params.per = per  # orbital period
+        params.w = 90.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46,0.13]  # stellar limb darkening coefficients
+        #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.493
+        params.a_abs = 0.04394  # The absolute value of the semi-major axis [AU]
+        params.inc = 87.98  # Inclination
+        params.ecc = 0.22  # Eccentricity
+        params.rp = 0.04860  # Best method
+        params.a = 13.75  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 810
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+    elif system == 'TOI-1130c':
+        # https://arxiv.org/pdf/1610.09533.pdf
+        per = 8.350381
+        params.t0 = 2458657.90461
+        params.per = per  # orbital period
+        params.w = -28.  # longitude of periastron (in degrees) #Don't care, no e
+        params.limb_dark = "quadratic"  # limb darkening model #don't care
+        params.u = [0.46, 0.13]  # stellar limb darkening coefficients
+        # params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
+        params.Hmag = 8.493
+        params.a_abs = 0.07098  # The absolute value of the semi-major axis [AU]
+        params.inc = 87.43  # Inclination
+        params.ecc = 0.047  # Eccentricity
+        params.rp = 0.218  # Best method
+        params.a = 22.21  # Most precise Semi-major axis scaled by stellar radius
+        params.Teq = 637
+        params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+
+
     else:
         print 'WARNING unsupported system.'
     for key in kwargs:

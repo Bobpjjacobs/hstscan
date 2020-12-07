@@ -230,12 +230,19 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
 
   # Read in whole table as an list of strings, one string per line
   ctable = open(coordtable, 'r')
-  wholetable = ctable.readlines()
+  wholetable=ctable.readlines()
+  if len(wholetable) == 1:
+      wholetable = wholetable[0].replace('\r', '\n')
+      wholetable = wholetable.split('\n')
+      for i,line in enumerate(wholetable):
+          wholetable[i] = line + '\n'
   ctable.close()
 
   # Find start and end line
   i = 0
+  start = 0
   # while end has not been found:
+  #print i,wholetable[i].find(end_data)
   while wholetable[i].find(end_data) == -1:
     # if start is found get the index of next line:
     if wholetable[i].find(start_data) != -1:
@@ -302,13 +309,10 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
 
 
 
-def jdutc2jdtdb(jd_utc, source_dir='src/'):
-
-    taifile = source_dir+'tai-utc.dat'
-
+def jdutc2jdtdb(jd_utc, taifile='/Users/bob/Documents/PhD/hstscan/hstscan/src/tai-utc.dat'):
     months = {v: k for k,v in enumerate(calendar.month_abbr)}
     try: # get last time the tai file was updated
-        last_update = time.ctime(os.path.getctime(source_dir+'tai-utc.dat'))
+        last_update = time.ctime(os.path.getctime(taifile))
         _, umonth, uday, _, uyear = last_update.split() # e.g. Tue Feb 16 12:08:40 2016
         uday, uyear = int(uday), int(uyear)
         try: umonth = months[umonth]
@@ -332,7 +336,7 @@ def jdutc2jdtdb(jd_utc, source_dir='src/'):
         # does this handle its own exceptions?
 
     # read in UTC -> TAI (leapsecond) correction
-    with open(source_dir+'tai-utc.dat', 'r') as g:
+    with open(taifile, 'r') as g:
         lines = g.readlines()
         line = lines[-1].split()
         dt = float(line[6])

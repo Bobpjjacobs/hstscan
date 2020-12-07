@@ -363,7 +363,49 @@ def extended_gaussian(x, scale, mu, sig, width):
 def two_gaussians(x, scale1, mu1, sig1, scale2, mu2, sig2):
     '''Sum of two gaussians.'''
     return gaussian(x, scale1, mu1, sig1) + gaussian(x, scale2, mu2, sig2)
-    
+
+def get_y0(subexposure, y_di, yguess_offsets, di_ps2, postarg2, expnr, exptime, subexptime, scan_direction, t, tel, logger):
+    """
+    Estimate a y0 from the direct image
+
+    :param subexposure: an _ima subexposure instance
+    :param y_di: the y-position of the star in the direct image
+    :param yguess_offsets: The offsets to the guess of the y0 position: one for the forward direction, one for reverse.
+    :param di_ps2: the postarg2 argument of the direct image
+    :param postarg2: the postarg2 argument of the subexposure
+    :param exptime: the exposure time of the exposure containing the subexposure
+    :param subexptime: the exposure time of this subexposure
+    :param scan_direction: the scan direction of the exposure containing the subexposure. Should be either +1 or -1
+    :param t: An option dictionary
+    :param tel: The telescope in use
+    :param logger: A logger object.
+    :return: y0 and the width of the spectrum in y-direction.
+    """
+    if scan_direction == -1:
+        yguess_offset = yguess_offsets[1]
+    elif scan_direction == 1:
+        yguess_offset = yguess_offsets[0]
+    y0 = y_di + yguess_offset + (scan_direction * (
+            t.scan_rate * subexptime)) / tel.yscale  # guess of y, in pixels
+    if t.remove_scan and ((t.default_scan == 'r' and scan_direction == +1) or (
+            t.default_scan == 'f' and scan_direction == -1)):
+        y0 -= (scan_direction * (
+                t.scan_rate * exptime)) / tel.yscale  # undo full scan
+        if expnr == 0: logger.info('default_scan=scan ({}). Undo full scan'.format(t.default_scan))
+    if t.postarg_yguess:
+        y0 -= (postarg2 - di_ps2) / tel.yscale
+        if expnr == 0: logger.info('applying postarg offset to yguess, {:.2f} pix'.format(
+            (postarg2 - di_ps2) / tel.yscale))
+    if t.scanned:
+        width0 = subexposure.SCI.header['DELTATIM'] * t.scan_rate / tel.yscale  # initial guess of width
+    else:
+        width0 = 40
+    if y0 + width0  > subexposure.SCI.data.shape[1]:
+        y0 = subexposure.SCI.data.shape[1] - width0 #/ 2.
+    elif y0 - width0  < 0:
+        y0 = width0 #/ 2.
+    return y0, width0
+
 def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_scans=False):
     '''
     Find extent of scan in y-direction by fitting extended gaussian.
@@ -417,5 +459,5 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p.plot([yend]*2,[0,ylim[1]*10], color='r', ls='--')        
         p.legend()
         p.show()
-    
+
     return ystart, ymid, yend
