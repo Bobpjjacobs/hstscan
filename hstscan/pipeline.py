@@ -340,6 +340,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
         # treat flt file as a single subexposure
         subexposure = exposure.reads[0]
         DQ_mask = subexposure.remove_bad_pix(replace=t.dq_replace, int_flags=t.dq_flags, width=t.dq_mean_width)
+        subexposure.DQs = DQ_mask
         subexposure.DQ_mask = DQ_mask
         subexposure.mask = DQ_mask
         subexposures.append(subexposure)
@@ -350,6 +351,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             # Form subexposure
             subexposure = r.create_sub_exposure(read1, read2, read_noise=t.read_noise, nlincorr=t.nlincorr,
                                                 nlinfile=t.nlin_file)
+            subexposure.DQs = DQ_mask
             subexposure.DQ_mask = DQ_mask
             subexposure.mask = DQ_mask  # track total mask (DQ + CR hits)
             subexposures.append(subexposure)
@@ -637,7 +639,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         tight_layout=False, vmin=0.9, vmax=1.1, show=False)
             p.suptitle('Flat-field for each exposure')
             save_fig()
-            if t.dispersion:
+            if t.dispersion and False:
 
 
                 #int(xpix) + dL, x1 + dL, subexposure.ystart + dL,
@@ -652,9 +654,13 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 fig, (ax1, ax2) = p.subplots(2, 1, sharex=True, figsize=(10,10))
                 fig.subplots_adjust(hspace=0)
                 ax1.imshow(ff0, cmap='binary_r', vmin=0.9, vmax=1.1, aspect="auto")
+                ax1.set_title('Flatfield in upper panel, uncorrected data in bottom panel. See how flat-field stripes may coincide with errors in data.')
+                ax1.set_ylabel('pixels')
 
                 #ax2.plot(np.arange(200), np.sum(subexposures[s].SCI.data[0:L, int(xpix): x1], axis=0))
                 ax2.plot(np.arange(200), np.sum(subexposures[s].SCI.data[subexposures[s].ystart:subexposures[s].yend, int(xpix):int(xpix) + 200], axis=0))
+                ax2.set_xlabel('Wavelength (microns)')
+                ax2.set_ylabel('Total flux level')
                 labels = [wave_ref[0], wave_ref[25], wave_ref[50],wave_ref[75], wave_ref[100], wave_ref[125],
                           wave_ref[150], wave_ref[175], wave_ref[199]]
                 p.xticks([0, 25, 50, 75, 100, 125, 150, 175, 199], [str(round(float(label), 2)) for label in labels])
@@ -679,9 +685,13 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 fig, (ax1, ax2) = p.subplots(2, 1, sharex=True, figsize=(10,10))
                 fig.subplots_adjust(hspace=0)
                 ax1.imshow(ff0, cmap='binary_r', vmin=0.9, vmax=1.1, aspect="auto")
+                ax1.set_title('Flatfield in upper panel, uncorrected data in bottom panel. See how flat-field stripes may coincide with errors in data.')
+                ax1.set_ylabel('pixels')
 
                 #ax2.plot(np.arange(200), np.sum(subexposures[s].SCI.data[0:L, int(xpix): x1], axis=0))
                 ax2.plot(np.arange(200), np.sum(subexposures[expnr].SCI.data[subexposures[expnr].ystart:subexposures[expnr].yend, int(xpix):int(xpix) + 200], axis=0))
+                ax2.set_xlabel('Wavelength (microns)')
+                ax2.set_ylabel('Total flux level')
                 labels = [wave_ref[0], wave_ref[25], wave_ref[50],wave_ref[75], wave_ref[100], wave_ref[125],
                           wave_ref[150], wave_ref[175], wave_ref[199]]
                 p.xticks([0, 25, 50, 75, 100, 125, 150, 175, 199], [str(round(float(label), 2)) for label in labels])
@@ -846,7 +856,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             print ("This should have a median energy of 1000 electrons")
 
         all_CRs = np.sum(CR_masks, axis=0)
-        DQ_masks = [subexposure.DQ_mask for subexposure in subexposures]
+        DQ_masks = [subexposure.DQs for subexposure in subexposures]
         all_DQs = np.sum(DQ_masks, axis=0)
         most_CRs = np.logical_not(all_DQs) & all_CRs
         exposure.CRs = all_CRs
