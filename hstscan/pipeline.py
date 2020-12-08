@@ -444,13 +444,13 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             if step == 'final':
                 if t.ref_exp != exposure.rootname and t.wshift_to_ref:
                     # Cross correlate first subexposure to the first subexposure of the (reduced) reference image:
-                    s2 = 0  #2#-1
+                    s2 = 0
                     if np.sign(ref_exp.Primary.header['POSTARG2']) == np.sign(exposure.Primary.header['POSTARG2']):
                         #Both ref and this exposure are forward/reverse
-                        s = 0  #2#-1
+                        s = 0
                     else:
                         #Ref and this exposure have a different scan direction
-                        s = -1  #1#0
+                        s = -1 
                     ref_tot = np.nansum(ref_exp.subexposures[s].SCI.data[new_subs[s2].ystart:new_subs[s2].yend,
                                         xpix:xpix + 200], axis=0)
                     ref_tot = (ref_tot / np.nansum(ref_tot))
@@ -572,23 +572,6 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                                                                            cut_image, cut_mask, tol=t.contam_thresh)
                 else:
                     interp_image, interp_mask = cut_image, cut_mask
-
-                """
-                tsiaras_wave_grid = disp.dispersion_solution(x0=xpix, L=image.shape[0], Dxoff=XOFF, Dxref=Dxref,
-                                                                     ystart=ystart, yend=yend, DISP_COEFFS=DISP_COEFFS,
-                                                                     TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y,
-                                                                     wdpt_grid_lam=t.grid_lam,
-                                                                     WFC_conf_file=conf_file)
-                tsiaras_waves = np.linspace(t.ref_wv0, t.ref_wv1, 200)
-                interp_image_tsiaras, interp_mask_tsiaras = disp.interp_wave_grid_sane(tsiaras_waves, tsiaras_wave_grid,
-                                                                           cut_image, cut_mask, tol=t.contam_thresh)
-
-                spectrum_default = np.nansum(interp_image, axis=0)
-                spectrum_tsiaras = np.nansum(interp_image_tsiaras, axis=0)
-                p.plot(subexposure.waves, spectrum_default)
-                p.plot(tsiaras_waves, spectrum_tsiaras)
-                p.show()
-                """
 
 
                 subexposure.interp_image = interp_image
@@ -1220,35 +1203,6 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                 else:
                     logger.warning("Could not detect a scan direction.")
 
-            """
-            Dsave = D.copy()
-
-            D1, mask1, bg1, CR1, err1 = map(lambda image:r.box_cut(ypix -2, image, box_h, force_shape=False),
-                                       [Dsave, mask, bg, CR, err])
-            V1 = np.square(err1)
-            M_DQ1, M_CR1 = np.logical_not(mask1).astype(int), np.ones_like(mask1)  # just put CRs in DQ mask
-
-            #print ("summm", np.sum(D1))
-            D2, mask2, bg2, CR2, err2 = map(lambda image:r.box_cut(ypix - 1, image, box_h, force_shape=False),
-                                            [Dsave, mask, bg, CR, err])
-
-            V2 = np.square(err2)
-            M_DQ2, M_CR2 = np.logical_not(mask2).astype(int), np.ones_like(mask2)  # just put CRs in DQ mask
-            
-            #print ("summm", np.sum(D2))
-            D3, mask3, bg3, CR3, err3 = map(lambda image:r.box_cut(ypix + 1 , image, box_h, force_shape=False),
-                                       [Dsave, mask, bg, CR, err])
-            V3 = np.square(err3)
-            M_DQ3, M_CR3 = np.logical_not(mask3).astype(int), np.ones_like(mask3)  # just put CRs in DQ mask
-            #print ("summm", np.sum(D3))
-            D4, mask4, bg4, CR4, err4 = map(lambda image:r.box_cut(ypix + 2, image, box_h, force_shape=False),
-                                       [Dsave, mask, bg, CR, err])
-            V4 = np.square(err4)
-            M_DQ4, M_CR4 = np.logical_not(mask4).astype(int), np.ones_like(mask4)  # just put CRs in DQ mask
-            #print ("summm", np.sum(D4))
-            #if int(ypix) == 163: ypix =162
-            #print (int(ypix))
-            #"""
             D, mask, bg, CR, err = map(lambda image:r.box_cut(ypix, image, box_h, force_shape=False),
                                        [D, mask, bg, CR, err])
             #print("hi1", D[int(box_h / 2),100])
@@ -1315,27 +1269,11 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
 
             # toggle removing the background before optimal extraction
             # or can handle the background in the extraction
-            #D[(mask) & (D < 0)] = 0
-            #D1[(mask1) & (D1 < 0)] = 0
-            #D2[(mask2) & (D2 < 0)] = 0
-            #D3[(mask3) & (D3 < 0)] = 0
-            #D4[(mask4) & (D4 < 0)] = 0
-            #print (np.min(D[~mask]), np.min(D1[~mask1]), np.min(D2[~mask2]), np.min(D3[~mask3]), np.min(D4[~mask4]), np.mean(bg))
 
             if t.remove_bg:
                 D, S = D, 0
-                #D1, S1 = D1, 0
-                #D2, S2 = D2, 0
-                #D3, S3 = D3, 0
-                #D4, S4 = D4, 0
             else:
                 D, S = D + bg, bg
-                #D1, S1 = D1 + 5*bg1, 5*bg1
-                #D2, S2 = D2 + 5*bg2, 5*bg2
-                #D3, S3 = D3 + 5*bg3, 5*bg3
-                #D4, S4 = D4 + 5*bg4, 5*bg4
-            #print ("mind", np.min(D[~mask]), np.min(D1[~mask1]), np.min(D2[~mask2]), np.min(D3[~mask3]), np.min(D4[~mask4]))
-            #print ("mind", (np.sum(D1) - np.sum(D)) / np.sum(D), (np.sum(D2) - np.sum(D)) / np.sum(D), (np.sum(D3) - np.sum(D)) / np.sum(D), (np.sum(D4) - np.sum(D)) / np.sum(D))
 
             if t.oe_pdf:
                 oe_pdf_file = t.save_dir + 'logs/{}_{}_fit.pdf'.format(reduced_exposure.Primary.header['ROOTNAME'],
@@ -1381,7 +1319,6 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                     smooth_spec.append(col)
                 P = np.vstack(smooth_spec).T
             P = P / np.sum(P, axis=0)
-            #spec, specV = ea.optimized_spectrum(D, t.s, P, V, M)
             spec = np.zeros(D.shape[1])
             specV = np.zeros(D.shape[1])
             for i in range(D.shape[1]):
@@ -1394,69 +1331,6 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         spectrum = f.Spectrum(subexposure.waves, spec, x_unit='Wavelength (microns)', y_unit='electrons')
         spectra.append(spectrum)
         variances.append(specV)
-        """
-        #print("sumspec", np.sum(spec))
-        #print("sumspec", np.sum(spec1))
-        #print("sumspec", np.sum(spec2))
-        #print("sumspec", np.sum(spec3))
-        #print("sumspec", np.sum(spec4))
-        #fig = p.figure(figsize=(10,10))
-        fig = p.figure(figsize=(10,10))
-        print (D1[int(box_h / 2),100], D[int(box_h / 2),100], D1[1,100], spectrum.x[100])
-        #p.scatter(spectrum.x, np.sum(D1,axis=0), color='b')
-        #p.scatter(spectrum.x, np.sum(D,axis=0), color='r')
-        data.plot_data(x=[spectrum.x, spectrum.x, spectrum.x, spectrum.x, spectrum.x],
-                       y=[spec, spec1, spec2, spec3, spec4],
-                       label=['ypix={}'.format(int(ypix)), 'ypix={}'.format(int(ypix)-2), 'ypix={}'.format(int(ypix)-1),
-                              'ypix={}'.format(int(ypix)+1), 'ypix={}'.format(int(ypix)+2)],
-                       title='OE result for different ypixs', xlabel='microns', ylabel='electrons')
-        p.gca().set_xlim(t.shift_wv0, t.shift_wv1)
-        spec_selec = spec[(spectrum.x > t.shift_wv0) & (spectrum.x < t.shift_wv1)]
-        #p.gca().set_ylim(0.9*min(spec_selec), 1.1*max(spec_selec))
-        #p.gca().set_ylim(0.9 * min(spec_selec- np.sum(D[(spectrum.x > t.shift_wv0) & (spectrum.x < t.shift_wv1)],axis=0)), 1.1 * max(spec_selec- np.sum(D[(spectrum.x > t.shift_wv0) & (spectrum.x < t.shift_wv1)],axis=0)))
-        p.legend()
-        p.show()
-        fig = p.figure(figsize=(10,10))
-        xjes = np.arange(len(spectrum.x))
-        Bins = [-1.e4, -2000, -1000, -500, -300, -200, -100, 0, 100, 200, 300, 500, 1000, 2000, 10000]
-        diff1 = ((spec1 - spec) / max(spec) * 1.e6).astype(int)
-        diff2 = ((spec2 - spec) / max(spec) * 1.e6).astype(int)
-        diff3 = ((spec3 - spec) / max(spec) * 1.e6).astype(int)
-        diff4 = ((spec4 - spec) / max(spec) * 1.e6).astype(int)
-        hist1 = np.histogram(diff1, bins=Bins)
-        hist2 = np.histogram(diff2, bins=Bins)
-        hist3 = np.histogram(diff3, bins=Bins)
-        hist4 = np.histogram(diff4, bins=Bins)
-        print (hist1[0], "mean", np.mean(diff1), 'std', np.std(diff1[(diff1>-500.) & (diff1<500.)]))
-        print (hist2[0], "mean", np.mean(diff2), 'std', np.std(diff2[(diff2>-500.) & (diff2<500.)]))
-        print(hist3[0], "mean", np.mean(diff3), 'std', np.std(diff3[(diff3>-500.) & (diff3<500.)]))
-        print(hist4[0], "mean", np.mean(diff4), 'std', np.std(diff4[(diff4>-500.) & (diff4<500.)]))
-        data.plot_data(#x=[spectrum.x, spectrum.x, spectrum.x, spectrum.x],
-                       x=[xjes, xjes, xjes, xjes],
-                       y=[(spec1 - spec) / max(spec) * 1.e6, (spec2 - spec) / max(spec) * 1.e6,
-                          (spec3 - spec) / max(spec) * 1.e6, (spec4 - spec) / max(spec) * 1.e6,],
-                       label=['ypix={}'.format(int(ypix)-2), 'ypix={}'.format(int(ypix)-1),
-                              'ypix={}'.format(int(ypix)+1), 'ypix={}'.format(int(ypix)+2)],
-                       title='OE difference from ypix={} in ppm'.format(int(ypix)), xlabel='microns',
-                       ylabel='Difference in ppm')
-        print ("total diff", (sum(spec1) - sum(spec)) / sum(spec), (sum(spec2) - sum(spec)) / sum(spec), (sum(spec3) - sum(spec)) / sum(spec), (sum(spec4) - sum(spec)) / sum(spec))
-        #p.gca().set_xlim(t.shift_wv0, t.shift_wv1)
-        p.gca().set_xlim(60,140)
-        p.legend()
-        #spec_selec = spec[(spectrum.x > t.shift_wv0) & (spectrum.x < t.shift_wv1)]
-        #p.gca().set_ylim(0.9*min(spec_selec), 1.1*max(spec_selec))
-        p.show()
-        #p.plot(spectrum.x, (spec1 - spec) / max(spec))
-        #p.plot(spectrum.x, (spec2 - spec) / max(spec))
-        #p.plot(spectrum.x, (spec3 - spec) / max(spec))
-        #p.plot(spectrum.x, (spec4 - spec) / max(spec))
-        #p.title(int(ypix))
-        #p.gca().set_xlim(50,100)
-        #p.gca().set_xlim(30,50)
-        #p.gca().set_xlim(1.2, 1.35)
-        #p.gca().set_ylim(2.4e6, 2.75e6)
-        #p.show()
-        #"""
     reduced_exposure.Ds = Ds;
     reduced_exposure.DQs = DQs  # ; reduced_exposure.CRs = CRs
     reduced_exposure.BGs = BGs
