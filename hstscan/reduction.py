@@ -1,5 +1,6 @@
 # coding=utf-8
 import data
+import os
 import extraction_algorithm as ea
 import numpy as np
 import pylab as p
@@ -571,12 +572,12 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
                 new_image = np.roll(image, sh, axis=axis)
                 image_stacks.append(new_image)
             medimage = np.nanmedian(image_stacks, axis=0)
-            stdimage = np.sqrt(np.nanmedian((image_stacks - medimage)**2., axis=0))
+            stdimage = np.sqrt(np.nanmean((image_stacks - medimage)**2., axis=0))
             #stdimage = np.nanstd(image_stacks, axis=0)
 
 
             # check if pixels are positive outliers
-            residuals = image - medimage #np.abs(image - medimage)
+            residuals = np.abs(image - medimage)
             #data.view_frame_image(residuals[50:100,70:120])
             #data.view_frame_image((tol * stdimage)[50:100,70:120])
             #data.view_frame_image(image[50:100,150:200]**5.)
@@ -598,7 +599,7 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
             masks.append(mask)
 
     #mask = np.logical_or(masks[0], masks[1])  # flag if either are flagged
-    mask = np.logical_and(masks[0], masks[1])  # flag if both are flagged
+
     if not mask_dq: mask[dq_mask] = False  # dont want to count DQ pixels as CRs
     if replace == 'median':
         replace = np.mean(medimages, axis=0)
@@ -613,8 +614,8 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
     cr_info['res_x'] = ress[1]
     cr_info['sigma_y'] = stds[0]
     cr_info['sigma_x'] = stds[1]
-    cr_info['cr_vals'] = np.hstack([ress[0][masks[0]].flatten(), ress[1][masks[1]].flatten()])
-    cr_info['cr_sigmas'] = np.hstack([stds[0][masks[0]].flatten(), stds[1][masks[1]].flatten()])
+    cr_info['cr_vals'] = ress[0][mask].flatten()#np.hstack([ress[0][masks[0]].flatten(), ress[1][masks[1]].flatten()])
+    cr_info['cr_sigmas'] = stds[0][mask].flatten()#np.hstack([stds[0][masks[0]].flatten(), stds[1][masks[1]].flatten()])
     return new_image, mask, cr_info
 
 
@@ -807,6 +808,8 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
     f_sens = interp1d(Sensitivity_W, Sensitivity, bounds_error=False, fill_value=0.)
 
     Fitsmodel = False
+    assert(os.path.isfile(t.stellar_spectrum), "file {} does not exist".format(t.stellar_spectrum) )
+    assert(os.path.isfile(t.stellar_wavelengths), "file {} does not exist".format(t.stellar_wavelengths) )
     try:
         stellar_file = pyfits.open(t.stellar_spectrum)[0]
         stellar_W = pyfits.open(t.stellar_wavelengths)[0].data / 10000. #transform to microns.
@@ -1155,18 +1158,18 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.28]  # stellar limb darkening coefficient
     elif system == 'HD209458':
-        per = 3.525
-        params.t0 = 2456196.28934
+        per = 3.52474859
+        params.t0 = 2452826.628521
         params.t_secondary = params.t0 + per / 2.
         params.per = per  # orbital period
         params.rp = 1.38 * cs.R_jup.value / (1.162 * cs.R_sun.value)  # Rp/Rs, mean 0.0142
-        params.a = 0.04747 * cs.au.value / (1.162 * cs.R_sun.value)  # semi-major axis (a/Rs)
-        params.inc = 86.59  # orbital inclination (in degrees)
+        params.a = 8.76  # semi-major axis (a/Rs)
+        params.inc = 86.71  # orbital inclination (in degrees)
         params.ecc = 0.  # eccentricity
         params.w = 83.  # longitude of periastron (in degrees)
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.28]  # stellar limb darkening coefficient
-        params.Teq = 1446
+        params.Teq = 1449
     elif system == 'KELT-9':
         #### Following Borsa et al. 2019: https://arxiv.org/pdf/1907.10078.pdf
         # G: Following Gaudi et al. 2017: https://arxiv.org/pdf/1706.06723.pdf
@@ -1177,7 +1180,7 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.per = per  # orbital period
         params.w = 90.  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "linear"  # limb darkening model #don't care
-        #params.u = [0.55]  # stellar limb darkening coefficients
+        params.u = [0.55, 0.]  # stellar limb darkening coefficients
         #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
         params.Hmag = 7.492  #Simbad
         params.a_abs = 0.03547  # The absolute value of the semi-major axis [AU]
@@ -1188,6 +1191,14 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.rp = 0.081  #A Best method  #3sigma 0.087#
         params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+        params.pulse_alpha = 31.9
+        params.pulse_beta = -109.5
+        params.pulse_Pi = 7.58695 / 24.
+        params.harm_A1 = 21.0
+        params.harm_A2 = -35.7
+        params.harm_B2 = 16.1
+        params.harm_A3 = 13.9
+        params.harm_B3 = -3.
         """
         # Following Ahlers et al. (2020) (incl. grav. darkening): https://arxiv.org/pdf/2004.14812.pdf
         per = 1.4811224  ##Parvianen et al. 2017 Period [days]
@@ -1358,6 +1369,7 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a = 22.21  # Most precise Semi-major axis scaled by stellar radius
         params.Teq = 637
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
+
 
 
     else:

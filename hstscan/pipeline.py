@@ -450,7 +450,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                         s = 0
                     else:
                         #Ref and this exposure have a different scan direction
-                        s = -1 
+                        s = -1
                     ref_tot = np.nansum(ref_exp.subexposures[s].SCI.data[new_subs[s2].ystart:new_subs[s2].yend,
                                         xpix:xpix + 200], axis=0)
                     ref_tot = (ref_tot / np.nansum(ref_tot))
