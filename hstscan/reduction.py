@@ -576,20 +576,12 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
             #stdimage = np.nanstd(image_stacks, axis=0)
 
 
-            # check if pixels are positive outliers
+            # check if pixels are outliers
             residuals = np.abs(image - medimage)
-            #data.view_frame_image(residuals[50:100,70:120])
-            #data.view_frame_image((tol * stdimage)[50:100,70:120])
-            #data.view_frame_image(image[50:100,150:200]**5.)
-            #data.view_frame_image(residuals[50:100,150:200])
-            #data.view_frame_image((tol * stdimage)[50:100,150:200])
-            #data.view_frame_image(np.abs(residuals) - tol * stdimage, vmin=0.)
             mask = np.abs(residuals) > tol * stdimage
             mask = np.logical_and(mask, residuals > thresh)
             mask = np.logical_or(mask, image > hard_e_limit)
-            #p.imshow(mask[50:100,70:120], origin='lower')
-            #p.imshow(mask[50:100,150:200], origin='lower')
-            #p.show()
+
             masks.append(mask);
             medimages.append(medimage)
             ress.append(residuals);
@@ -598,7 +590,7 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
             mask = np.zeros_like(image)
             masks.append(mask)
 
-    #mask = np.logical_or(masks[0], masks[1])  # flag if either are flagged
+    mask = np.logical_and(masks[0], masks[1])  # flag if either are flagged
 
     if not mask_dq: mask[dq_mask] = False  # dont want to count DQ pixels as CRs
     if replace == 'median':
