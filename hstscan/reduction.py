@@ -453,7 +453,9 @@ def background_removal(i, subexposure, t, logger=None):
             bg_image = bg_image.reshape((t.bg_h, t.bg_w))
 
             bg_dq_mask = subexposure.mask[np.array(bg_mask.astype(bool))]
-            CR_clean, CR_mask, CR_info = spatial_median_filter(bg_image, bg_dq_mask.reshape((t.bg_h, t.bg_w)))
+            CR_clean, CR_mask, CR_info = spatial_median_filter(bg_image, bg_dq_mask.reshape((t.bg_h, t.bg_w)),
+                                                               tolx=t.cr_tolx, toly=t.cr_toly, replace=t.cr_replace, \
+                                                                 debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh)
 
             bg, bg_err = np.nanmedian(bg_image[~CR_mask]), np.nanstd(bg_image[~CR_mask])
         else:
@@ -566,17 +568,78 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
     for axis, shift, tol in zip([0, 1], [sy, sx], [toly, tolx]):
         if shift != 0:
             # Find the local pixels median and std
+            #"""
             image_stacks = []
             for sh in range(-shift, shift + 1, 1):  # 0 spatial, 1 spectral
                 if sh == 0: continue  # dont count self
                 new_image = np.roll(image, sh, axis=axis)
                 image_stacks.append(new_image)
+            #print "imagestackssize", np.array(image_stacks).shape
             medimage = np.nanmedian(image_stacks, axis=0)
-            stdimage = np.sqrt(np.nanmean((image_stacks - medimage)**2., axis=0))
+            #stdimage = np.sqrt(np.nanmean((image_stacks - medimage)**2., axis=0))
+            stdimage = np.sqrt(np.nanmedian((image_stacks - medimage)**2., axis=0))
+            residuals = np.abs(image_stacks - medimage)
+            mask1 = np.abs(residuals) > 2 * stdimage
+            #print "mask", np.sum(mask1), mask1.shape
+            #stdimage2 = np.sqrt(np.nanmean((image_stacks[~mask1] - medimage)**2., axis=0))
+            #print "shift", shift
+            #for x in range(shift):
+            #    print np.mean(stdimage[x])
+            #    print image_stacks[x].shape, medimage.shape
+            #    print image_stacks[x].shape, medimage.shape
+            #    print np.mean(np.sqrt((image_stacks[x][~mask1[x]] - medimage)**2.))
+            #print "stdimage", np.mean(stdimage2), np.mean(stdimage)
+            """
+            medimage2 = []
+            stdimage2 = []
+            if axis == 0:
+                axisinvert = 1
+            elif axis == 1:
+                axisinvert = 0
+            for col in range(image.shape[axisinvert]):
+                col_stacks = []
+                for sh in range(-shift, shift + 1, 1):
+                    if sh == 0: continue  # dont count self
+                    if axis == 0:
+                        new_col = np.roll(image[:,col], sh)
+                    elif axis == 1:
+                        new_col = np.roll(image[col], sh)
+                    col_stacks.append(new_col)
+                col_stacks = np.array(col_stacks)
+                medcol = np.nanmedian(col_stacks, axis=0)
+                #print col_stacks.shape, np.array(image_stacks).shape#medcol[:10], medimage[col][:10]
+                stdcol_int = np.sqrt(np.nanmean((col_stacks - medcol)**2., axis=0))
+                #masked = 0
+                #print col_stacks.shape
+                stdcol = []
+                for pix in range(len(medcol)):
+                    pixmask = np.abs(col_stacks[:,pix] - medcol[pix]) > tol * stdcol_int[pix]
+                    #print col_stacks[:,pix][~pixmask]
+                    #print medcol
+                    stdpix = np.sqrt(np.nanmean((col_stacks[:,pix][~pixmask] - medcol[pix])**2.))
+                    #print col_stacks[:,pix], medcol[pix], np.nanmean((col_stacks[:,pix][~pixmask] - medcol[pix])), stdpix
+                    stdcol.append(stdpix)
+                    #masked += np.sum(pixmask)
+                #stdcol = []
+
+                #stdcol = np.array(stdcol)
+                medimage2.append(medcol)
+                stdimage2.append(stdcol)
+            if axis == 0:
+                medimage, stdimage = np.array(medimage2).T, np.array(stdimage2).T
+            elif axis == 1:
+                medimage, stdimage = np.array(medimage2), np.array(stdimage2)
+            """
+
+            #print (medimage2 - medimage) / medimage
+            #print "std", axis, (stdimage2 - stdimage)/stdimage
+                #print masked / float(len(medcol)), tol
+
             #stdimage = np.nanstd(image_stacks, axis=0)
 
 
             # check if pixels are outliers
+            #print image.shape
             residuals = np.abs(image - medimage)
             mask = np.abs(residuals) > tol * stdimage
             mask = np.logical_and(mask, residuals > thresh)
@@ -589,6 +652,7 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
         else:
             mask = np.zeros_like(image)
             masks.append(mask)
+    #print error
 
     mask = np.logical_and(masks[0], masks[1])  # flag if either are flagged
 
@@ -768,7 +832,8 @@ def spec_pix_shift(template_x, template_y, x_new, y_new, norm=True, interp_templ
 
 
 
-def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_poly_args, tsiaras_args, plot, fitpeak=False):
+def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_poly_args, tsiaras_args, plot,
+                   use_2nd_order=False, fitpeak=False):
     """
     Given an image (with spectrum) and a stellar spectrum it computes the shift in x compared to the direct image.
     This is done by comparing the subexposure spectrum (subtracted by a stellar spectrum) to the grism response function
@@ -785,8 +850,9 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
     Data = subexposure.SCI.data
     flux = np.nansum(Data, axis=0)
 
-    #Remove zeroth order spectrum
-    if len(flux) == 512:
+    #Remove zeroth order spectrum (only if it is visible; only if the first order spectrum is further to the right than
+    # pixel nr. 200)
+    if len(flux) == 512 and np.argmax(flux) > 200:
         flux[:150] = 0
 
     if fitpeak:
@@ -798,6 +864,12 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
     Sensitivity = F[1].data['SENSITIVITY']
     Sensitivity_W = F[1].data['WAVELENGTH'] / 10000.  # Converted to microns
     f_sens = interp1d(Sensitivity_W, Sensitivity, bounds_error=False, fill_value=0.)
+    if t.use_2nd_order:
+        assert t.trans_file2_g141 is not 'None', "Please define the transmission function of the second order in the config file"
+        F = pyfits.open(t.trans_file2_g141)
+        Sensitivity2 = F[1].data['SENSITIVITY']
+        Sensitivity2_W = F[1].data['WAVELENGTH'] / 10000.  # Converted to microns
+        f_sens2 = interp1d(Sensitivity2_W, Sensitivity2, bounds_error=False, fill_value=0.)
 
     Fitsmodel = False
     assert(os.path.isfile(t.stellar_spectrum), "file {} does not exist".format(t.stellar_spectrum) )
@@ -830,8 +902,9 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
     f_stellar = interp1d(stellar_W, stellar_spec / Scale, bounds_error=False, fill_value=0.)
 
     c, catalogue, subexp_time, e, scan_direction, a, L, L, XOFF, YOFF, d, b, x_di, ymid, disp_coef = tuple(cal_disp_poly_args)
-    L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, grid_y, grid_lam, x_di, conf_file, contam_thresh = tsiaras_args
+    #L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, grid_y, grid_lam, x_di, conf_file, contam_thresh = tsiaras_args
 
+    """
     if L == 256:
         #p0 = [-120., -16.]
         #Bounds = ([-300., -50.], [50., 0.])
@@ -844,19 +917,68 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
         Bounds = ([-100., -50.] , [150., 0.])
         p0_t = [0., -14.5]
         Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
+    """
+    second_order_split=300
 
-    Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure)
-    opt, cov = Object.fit(wave_grid[0][Peakbool], flux[Peakbool], Bounds, p0)
-    displacement, amplitude = opt
-    displacement_err, amplitude_err = np.sqrt(np.diag(cov))
+    if t.use_2nd_order:
+        assert L == 512, "The size of the exposure is not 512x512 ????"
+        p0 = [-20., - 15., -20., -15.]
+        Bounds = ([-100., -50., -50., -100.], [150., 0., 0., 150.])
+        p0_t = [0., -14.5, 0., -14.5]
+        Bounds_t = ([-x_di, -50, -50., -x_di], [L - 200. - x_di, 0., L - 200. - x_di, 0.])
+        Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure,
+                              use_second_order=True, f_sens2 = f_sens2, second_order_split=second_order_split)
+        opt, err = Object.fit(wave_grid[0][Peakbool], flux[Peakbool], Bounds, p0)
+        displacement, amplitude, displacement2, amplitude2 = opt
+        displacement_err, amplitude_err, displacement2_err, amplitude2_err = err
+    else:
+        if L == 256:
+            # p0 = [-120., -16.]
+            # Bounds = ([-300., -50.], [50., 0.])
+            p0 = [30., -16.]
+            Bounds = ([-300., -50.], [250., 0.])
+            p0_t = [-121., -15.25]
+            Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
+        else:
+            p0 = [-20., -15.]
+            Bounds = ([-100., -50.], [150., 0.])
+            p0_t = [0., -14.5]
+            Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
+        Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure)
+        opt, err = Object.fit(wave_grid[0][Peakbool], flux[Peakbool], Bounds, p0)
+        displacement, amplitude = opt
+        displacement_err, amplitude_err = err
+
 
 
     wave_grid_new, trace_new = cal.disp_poly(c, catalogue, subexp_time, e,
-                                     scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                     scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                      data_dir=d, debug=False, x=x_di + displacement,
                                      y=ymid, disp_coef=disp_coef)
 
-    Calculated = 10 ** (amplitude) * f_sens(wave_grid_new[0]) * f_stellar(wave_grid_new[0])
+    Element1 = 10 ** amplitude * f_sens(wave_grid_new[0]) * f_stellar(wave_grid_new[0])
+    if t.use_2nd_order:
+        wave_grid_new2, trace_new2 = cal.disp_poly(c, catalogue, subexp_time, e,
+                                                 scan_direction, order=2, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                                 data_dir=d, debug=False, x=x_di + displacement2,
+                                                 y=ymid, disp_coef=disp_coef)
+        wave_grid_new[wave_grid_new > 2.0] = wave_grid_new2[wave_grid_new > 2.0]
+        Element2 = np.zeros_like(Element1)
+        Element2[second_order_split:] += (10 ** amplitude2 * f_sens2(wave_grid_new[0]) * f_stellar(wave_grid_new[0]))[second_order_split:]
+    else:
+        Element2 = 0.
+
+    Calculated = Element1 + Element2
+
+    #p.plot(Element1)
+    #p.plot(Element2)
+    p.show()
+    if t.use_2nd_order:
+        print "amplitude and displacement on first order:", amplitude, displacement
+        print "amplitude and displacement on second order:", amplitude, displacement2
+        print "The displacement parameters should be comparable"
+    else:
+        print "amplitude and displacement on first order:", amplitude, displacement
 
 
     #waves_tsiaras = np.linspace(t.ref_wv0, t.ref_wv1, 200)
@@ -880,8 +1002,19 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
         p.gca().xaxis.set_major_locator(p.NullLocator())
         p.subplot(212)
         p.plot(wave_grid_new[0], flux / max(flux), label='Exposure')
-        p.plot(wave_grid_new[0], f_sens(wave_grid_new[0]) / max(f_sens(wave_grid_new[0])), label='Sensitivity')
-        p.plot(wave_grid_new[0], f_stellar(wave_grid_new[0]) / max(f_stellar(wave_grid_new[0])), label='Stellar')
+        if t.use_2nd_order:
+            p.plot(wave_grid_new[0][:second_order_split],
+                   (f_sens(wave_grid_new[0]) / max(f_sens(wave_grid_new[0])))[:second_order_split],
+                   label='Sensitivity_order1')
+            p.plot(wave_grid_new[0][second_order_split:],
+                   (f_sens2(wave_grid_new[0]) / max(f_sens2(wave_grid_new[0])))[second_order_split:],
+                   label='Sensitivity_order2')
+            p.plot(wave_grid_new[0][:second_order_split],
+                   (f_stellar(wave_grid_new[0]) / max(f_stellar(wave_grid_new[0])))[:second_order_split],
+                   label='Stellar')
+        else:
+            p.plot(wave_grid_new[0], f_sens(wave_grid_new[0]) / max(f_sens(wave_grid_new[0])), label='Sensitivity')
+            p.plot(wave_grid_new[0], f_stellar(wave_grid_new[0]) / max(f_stellar(wave_grid_new[0])), label='Stellar')
         fig.subplots_adjust(hspace=0)
         p.xlabel('Wavelength (microns)')
         p.gca().yaxis.set_major_locator(p.NullLocator())
@@ -890,13 +1023,17 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
 
 
 class spectrum_fit:
-    def __init__(self, f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure):
+    def __init__(self, f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure,
+                 use_second_order=False, f_sens2=None, second_order_split=300):
         self.f_sens = f_sens
         self.f_stellar = f_stellar
         self.c = cal_disp_poly_args
         self.c_t = tsiaras_args
         self.Peakbool = Peakbool
         self.subexposure = subexposure
+        self.use_second_order = use_second_order
+        self.f_sens2 = f_sens2
+        self.split = second_order_split
 
     def fitting_fn2(self, wave_grid, displacement, amplitude):
         Total = 10.**amplitude * self.f_sens(wave_grid + displacement) * self.f_stellar(wave_grid + displacement)
@@ -909,10 +1046,23 @@ class spectrum_fit:
     def fitting_fn(self, wave_grid, displacement, amplitude):
         a, catalogue, subexp_time, b, scan_direction, d, L, L, XOFF, YOFF, e, f, x_di, ymid, disp_coef = self.c
         wave_grid, trace = cal.disp_poly(a, catalogue, subexp_time, b,
-                                         scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                         scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                          data_dir=e, debug=False, x=x_di + displacement, y=ymid, disp_coef=disp_coef)
-        Total = 10.**amplitude * self.f_sens(wave_grid[0][self.Peakbool]) * self.f_stellar(wave_grid[0][self.Peakbool])
-        return Total
+        Element1 = 10 ** amplitude * self.f_sens(wave_grid[0][self.Peakbool]) * self.f_stellar(wave_grid[0][self.Peakbool])
+        if self.use_second_order:
+            return Element1[:self.split]
+        else:
+            return Element1
+
+
+
+    def fitting_fn2(self, wave_grid, displacement, amplitude):
+        a, catalogue, subexp_time, b, scan_direction, d, L, L, XOFF, YOFF, e, f, x_di, ymid, disp_coef = self.c
+        wave_grid, trace = cal.disp_poly(a, catalogue, subexp_time, b,
+                                         scan_direction, order=2, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                         data_dir=e, debug=False, x=x_di + displacement, y=ymid, disp_coef=disp_coef)
+        Element1 = 10 ** amplitude * self.f_sens2(wave_grid[0][self.Peakbool]) * self.f_stellar(wave_grid[0][self.Peakbool])
+        return Element1[self.split:]
 
     def fitting_fn_tsiaras(self, waves, displacement, amplitude):
         L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, grid_y, grid_lam, x_di, conf_file, contam_thresh = self.c_t
@@ -932,11 +1082,27 @@ class spectrum_fit:
         return Total - Expected
 
     def fit(self, wave_grid, flux, Bounds, P0):
-        opt, cov = curve_fit(self.fitting_fn, wave_grid, flux, bounds=Bounds, p0=P0)
-        p.plot(wave_grid, flux)
-        p.plot(wave_grid, self.fitting_fn(wave_grid, opt[0], opt[1]))
-        p.show()
-        return opt, cov
+
+
+        if self.use_second_order:
+            opt1, cov1 = curve_fit(self.fitting_fn, wave_grid, flux[:300], bounds=(Bounds[0][:2], Bounds[1][:2]),
+                                   p0=P0[:2])
+            err1 = np.sqrt(np.diag(cov1))
+            opt2, cov2 = curve_fit(self.fitting_fn2, wave_grid, flux[300:], bounds=(Bounds[0][2:], Bounds[1][2:]), p0=P0[2:])
+            err2 = np.sqrt(np.diag(cov2))
+            opt = [opt1[0], opt1[1], opt2[0], opt2[1]]
+            err = [err1[0], err1[1], err2[0], err2[1]]
+        else:
+            opt, cov = curve_fit(self.fitting_fn, wave_grid, flux, bounds=(Bounds[0][:2], Bounds[1][:2]), p0=P0[:2])
+            err = np.sqrt(np.diag(cov))
+        #p.plot(wave_grid[:300], flux[:300])
+        #p.plot(wave_grid[:300], self.fitting_fn(wave_grid, *opt1))
+        #p.show()
+        #p.plot(wave_grid[300:], flux[300:])
+        #p.plot(wave_grid[300:], self.fitting_fn2(wave_grid, *opt2))
+        #p.show()
+
+        return opt, err
 
     def fit_tsiaras(self, waves, Bounds, P0):
         opt, cov = curve_fit(self.fitting_fn_tsiaras, waves, np.zeros(200), bounds=Bounds, p0=P0)
@@ -1181,6 +1347,7 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.inc = 87.2  #A Best method and more precise than #W  #3sigma: 85.41#
         params.ecc = 0.0  #W Eccentricity
         params.rp = 0.081  #A Best method  #3sigma 0.087#
+        params.rs = 2.39  #Solar radii  #A
         params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
         params.pulse_alpha = 31.9

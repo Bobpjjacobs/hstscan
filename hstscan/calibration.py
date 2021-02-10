@@ -59,7 +59,7 @@ def calc_poly_order(coeffs):
     return int(m)
 
 
-def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', x_len=256, y_len=256, XOFF=0, YOFF=0,
+def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, order=1, x_len=256, y_len=256, XOFF=0, YOFF=0,
               data_dir='/', debug=False, log=False, pix_size=HST().xscale, original_image=None, image_name='',
               disp_coef='default', object_ind=0, x=None, y=None):
     '''
@@ -91,6 +91,17 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, n='A', 
     print "x",x
     print "y", y
     '''
+    if order == 0:
+        n = 'B'
+    elif order == 1:
+        n = 'A'
+    elif order == 2:
+        n = 'C'
+    elif order == 3:
+        n = 'D'
+    elif order == -1:
+        n = 'E'
+
     # Read in source information, assumed brightest source is the target
     # Need to use the associated direct image catalogue
     assert os.path.isfile(catalogue), 'Catalogue file does not exist: {}'.format(catalogue)

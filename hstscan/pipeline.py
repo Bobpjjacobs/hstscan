@@ -147,6 +147,9 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             save_dir (str):     directory to store the reduced files
             write (bool):       whether to write the file or not
 
+            use_2nd_order (bool): Whether to use the second order of the spectrum to fit the position of the spectrum
+                                   on the detector.
+
             units (bool): unit conversion from electrons/s to electrons
             object_ind (int): object index (brightest first) to extract from image, from catalogue
             scanned (bool): whether the exposure is spatially scanned or not
@@ -214,6 +217,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                'debug':False, 'pdf':False, 'logger':True,
                'scanned':True, 'scan_rate':None, 'units':True, 'nlincorr':False, 'read_noise':20, 'remove_scan':False,
                'bjd':True, 'hst_eph_file':'None',
+               'use_2nd_order':False,
                'dq_replace':None, 'dq_mean_width':1, 'dq_flags':[4, 32], 'skip_start':1, 'skip_end':0,
                'bg':True, 'bg_plot':False, 'bg_area':True, 'bg_x':0, 'bg_y':0, 'bg_h':50, 'bg_w':50,
                'psf_h':130, 'mask_h':40, 'psf_w':220, 'n_masks':3, 'neg_masks':0, 'disp_coef': 'wilkins',
@@ -230,7 +234,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                'flat_field':True, 'ff_min':0.5,
                'nysig':5, 'grid_y':20, 'grid_lam':20, 'two_scans':False, 'interp_kind':'linear',
                'nlin_file':None, 'flat_file_g141':'None', 'conf_file_g141':'None', 'trans_file_g141':'None',
-               'tai_utc_file':'None',
+               'trans_file2_g141':'None', 'tai_utc_file':'None',
                'stellar_spectrum':'None', 'stellar_wavelengths': 'None',
                'contam_thresh':0.01, 'hard_e_limit':1e10,
                'object_ind':0}
@@ -530,7 +534,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                     # Regular wavelength correction
                     L = subexposure.SCI.data.shape[0]
                     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
-                                                     scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                                     scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                                      data_dir=t.source_dir, debug=False, x=subexposure.xpix,
                                                      y=subexposure.ypix, disp_coef=t.disp_coef)
                     subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
@@ -803,6 +807,10 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             subexposure.SCI.header['CRs'] = (0, 'Number of crs detected in box (local median)')
             new_subs.append(subexposure)
         subexposures = new_subs
+    if t.cr_local or t.cr_master:
+        CR_masks = [subexposure.CR_mask for subexposure in subexposures]
+        all_CRs = np.sum(CR_masks, axis=0)
+        exposure.CRs = all_CRs
 
     if t.debug and (t.cr_local or t.cr_master):
         # Plot number of CRs over subexposures
@@ -838,11 +846,11 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             save_fig()
             print ("This should have a median energy of 1000 electrons")
 
-        all_CRs = np.sum(CR_masks, axis=0)
+
         DQ_masks = [subexposure.DQs for subexposure in subexposures]
         all_DQs = np.sum(DQ_masks, axis=0)
         most_CRs = np.logical_not(all_DQs) & all_CRs
-        exposure.CRs = all_CRs
+
         logger.info("Nr. of DQs, CRs and CRs minus DQs {}, {}".format(np.sum(all_DQs), np.sum(all_CRs)) +
                     " and {}".format(np.sum(most_CRs)))
         logger.info("Percentage of pixels affected by CRs:{} ".format(np.sum(most_CRs) / (float(most_CRs.shape[0]) *
@@ -1015,15 +1023,24 @@ def calc_abs_xshift(direct_image, exposure, subexposure, tel, t, scan_direction,
     ystart, ymid, yend = disp.get_yscan(image, x0=x_di, y0=y0, width0=width0, nsig=t.nysig,
                                         two_scans=t.two_scans, debug=True)
     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
-                                     scan_direction, n='A', x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                     scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                      data_dir=t.source_dir, debug=False, x=x_di,
                                      y=ymid, disp_coef=t.disp_coef)
+
+    if t.use_2nd_order:
+        wave_grid2, trace2 = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
+                                           scan_direction, order=2, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                           data_dir=t.source_dir, debug=False, x=x_di,
+                                           y=ymid, disp_coef=t.disp_coef)
+        wave_grid[wave_grid > 2.0] = wave_grid2[wave_grid > 2.0]
+
     cal_disp_poly_args = [t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
-                          scan_direction, 'A', L, L, XOFF, YOFF,
+                          scan_direction, 1, L, L, XOFF, YOFF,
                           t.source_dir, False, x_di, ymid, t.disp_coef]
     tsiaras_args = [L, XOFF, Dxref, ystart, yend, DISP_COEFFS, TRACE_COEFFS, t.grid_y, t.grid_lam, x_di, conf_file,
                     t.contam_thresh]
-    return r.find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_poly_args, tsiaras_args, plot, fitpeak=t.peak)
+    return r.find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_poly_args, tsiaras_args, plot,
+                            use_2nd_order=t.use_2nd_order, fitpeak=t.peak)
 
 
 def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
@@ -1497,8 +1514,12 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         # Don't rescale
         unit = 'Electrons'
 
-    exp_spectrum = f.Spectrum(x_ref, y, x_unit='Spectral Pixel', y_unit=unit, refshift=refshift,
-                              refshifterr=refshifterr)
+    if t.wshift_to_ref:
+        newrefshift = refshift + xpix - ref_exp_red.Primary.header['XPIX']
+    else:
+        newrefshift = refshift
+    exp_spectrum = f.Spectrum(x_ref, y, x_unit='Spectral Pixel', y_unit=unit, refshift=newrefshift,
+                                  refshifterr=refshifterr)
 
     if t.debug and len(spectra) > 1:
         fig = p.figure(figsize=(10,10))
@@ -1640,6 +1661,7 @@ def create_orbit_cats_gauss(data_dir='/home/jacob/hst_data/GJ-1214/', conf_file=
                     flt_fname = data_dir + fname.split('_')[0] + '_flt.fits'
                 else:
                     raise Exception('No flt or drz file found for {}'.format(fname))
+                print(flt_fname)
                 di = data.load(flt_fname, hst_file=conf_kwargs['hst_eph_file'], tai_file=conf_kwargs['tai_utc_file'])
                 full_images = [di.SCI.data.copy()]
                 full_image = full_images[0]

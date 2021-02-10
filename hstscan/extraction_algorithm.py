@@ -649,6 +649,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
             M_l = M[:,i]
             outliers = np.logical_not(M_l)
 
+
+
         if outliers_to_average:
             #Look for the pixels around the DQ flagged pixels and assume the scaled average of those pixels if possible
             dq_replaced = np.zeros_like(distn, dtype=bool)
@@ -817,10 +819,16 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
 
             showlist = [D.shape[1] / 2, D.shape[1] / 2 + 1]
             showlist.append(92)
+            #showlist.extend([109, 110, 111, 112, 113, 114])
+            show_knots=True
             if ((custom_knots is None and debug) or show_knots) and i in showlist:
                 #print P_l_unscaled - P_l2_unscaled, order
-                print f_l, "pl", np.sum(f_l), np.sum(distn) / np.max(distn)
-                print "Knots estimated by pipeline are:", knots
+                #print f_l, "pl", np.sum(f_l), np.sum(distn) / np.max(distn)
+                if custom_knots is None:
+                    print "Knots estimated by pipeline are:", knots
+                else:
+                    print "Knots used are:", knots
+
                 #print P_l_unscaled
                 xjes = np.arange(len(distn))
                 if slope_second_order:

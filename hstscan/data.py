@@ -327,7 +327,7 @@ class Data_flt():
             self.DQ = fits_file[3]
             self.SAMP = fits_file[4]
             self.TIME = fits_file[5]
-            self.WCSCORR = fits_file[6]
+            #self.WCSCORR = fits_file[6]
 
             #place this in a read
             [SCI, ERR, DQ, SAMP, TIME] = fits_file[1:6]

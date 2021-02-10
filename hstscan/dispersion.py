@@ -4,13 +4,22 @@ from scipy.optimize import leastsq, curve_fit
 from scipy.interpolate import interp1d
 import calibration as cal
 
-def get_conf_coeffs(WFC_conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf'):
+def get_conf_coeffs(WFC_conf_file = '/home/jacob/hstscan/src/WFC3.G141/WFC3.IR.G141.V2.5.conf', order=1):
     '''
     Read configuration file for G141
     Defines trace position and wavelengths along trace, using field-dependent coefficients
     See aXe manual for details
     '''
-    n = 'A'
+    if order == 0:
+        n = 'B'
+    elif order == 1:
+        n = 'A'
+    elif order == 2:
+        n = 'C'
+    elif order == 3:
+        n = 'D'
+    elif order == -1:
+        n = 'E'
     with open(WFC_conf_file) as cf:
         lines = cf.readlines()
         lines = [line[:-1] for line in lines if line[0] != '#']
@@ -428,6 +437,11 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p0 = (np.max(row_sum), y0, sigma0, np.max(row_sum), y1, sigma0)
 
     out = curve_fit(model, np.arange(len(row_sum)), row_sum, p0=p0)
+    Range = np.arange(len(row_sum))
+    maxindex = np.argwhere(row_sum == np.max(row_sum))[0][0]
+    f1 = interp1d(row_sum[Range < maxindex], Range[Range < maxindex])
+    f2 = interp1d(row_sum[Range > maxindex], Range[Range > maxindex])
+    print "FWHM of this subexposure is ", f2(0.5* np.max(row_sum)) - f1(0.5* np.max(row_sum))
     args = out[0]
     if two_scans:
         scale1, mu1, sig1, scale2, mu2, sig2 = args

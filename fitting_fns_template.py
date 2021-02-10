@@ -522,12 +522,12 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         sp_params.inc = inc
         sp_params.ecc = ecc
         sp_params.a = aRs
-        if u2 == 0.:
-            sp_params.limb_dark = "linear"  # limb darkening model #don't care
+        if sp_params.limb_dark == 'linear':
             sp_params.u = [u1]  # stellar limb darkening coefficients
-        else:
-            sp_params.limb_dark = "quadratic"  # limb darkening model #don't care
+        elif sp_params.limb_dark == "quadratic":
             sp_params.u = [u1, u2]  # stellar limb darkening coefficients
+        else:
+            pass
 
 
         #Make boolean masks for the first orbit and all other orbits.
@@ -1822,7 +1822,7 @@ class Planet:
                        verbose=True, t0=0., deltat=0., a=10., ecc=-1., phi=1000., inc=1000., sattime=1.e6,
                        sine=False, stel_pulse=False, harmonics=False,
                        separate_depth=True, fix_pulse_amp=False, puls_amp=1., fix_limb_dark=False, limb_dark='linear',
-                       fix_inclination=True, fix_eccentricity=True, fix_aRs=True,
+                       fix_inclination=True, fix_eccentricity=True, fix_aRs=True, disable_first_ramp=False,
                        disable_second_ramp=False, polynomial=False, same_Rorb=True, nosat=False, Transit=False,
                        exc_indices=[],
                        fitting_method='least_squares'):
@@ -1868,6 +1868,9 @@ class Planet:
         :param fix_inclination: (bool) Whether to fix the orbital inclination
         :param fix_eccentricity: (bool) Whether to fix the orbital eccentricity
         :param fix_aRs: (bool) Whether to fix a/Rs
+        :param disable_first_ramp: (bool) Whether to disable the orbit-ramp that is specific to the first orbit-only.
+                                     When disabled, the orbit-ramp for the first orbit will take the same form as the
+                                     second orbit.
         :param disable_second_ramp: (bool) Whether to disable the orbit-ramp of all orbits except for the first (this
                                     should be used if you're fitting a light curve for which you have divided out the
                                     ramp model already (the divisor should not include the first orbit)
@@ -2054,6 +2057,9 @@ class Planet:
             fit_params_t0.add('Harmonics_amplitude', value=1., min=0., max=3.)
         else:
             fit_params_t0.add('Harmonics_amplitude', value=0., vary=False)
+        if disable_first_ramp:
+            fit_params_t0['Rorb1_F'].expr = 'Rorb2_F'
+            fit_params_t0['Rorb1_R'].expr = 'Rorb2_R'
 
         def residual(pars, Times, data=None):
             pars['V1_R'].max = 0.5 * pars['depth_R'].value
