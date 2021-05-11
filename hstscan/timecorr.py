@@ -295,10 +295,12 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
   object_unit_y = np.cos(dec) * np.sin(ra)
   object_unit_z = np.sin(dec)
 
+
   # Dot product the vectors with n_hat
   rdotnhat = ( obsx * object_unit_x +
                obsy * object_unit_y +
                obsz * object_unit_z  )
+
 
   # Reshape back to the original shape
   rdotnhat = rdotnhat.reshape(tshape)

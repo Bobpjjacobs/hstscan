@@ -1120,7 +1120,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                'top_half':False, 'k_col':9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                'outliers_to_average':False, 'slopefactor':0.1, 'slope_second_order':False,
                'custom_knots_F':None, 'custom_knots_R':None, 'show_knots':False,
-               'wshift_to_ref':False, 'ref_exp': None
+               'wshift_to_ref':False, 'ref_exp': None, 'write':True
                }
     if conf_file:
         conf_kwargs = data.read_conf_file(conf_file)
@@ -1550,8 +1550,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
 
 
 
-
-    if t.save_dir:
+    if t.save_dir and t.write:
         # mark if the scan is forward or reverse, better not to do it here, instead use header of original file
         end = t.save_extension
 
@@ -1563,7 +1562,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         with open(fname, 'w') as txtf:
             # this assumes you did wavelength calibration
             txtf.write('wave\tflux\terror\n')
-            txtf.write('Start-time: {} \n'.format(reduced_exposure.Primary.header['t']))
+            txtf.write('Observation-time: {} \n'.format(reduced_exposure.Primary.header['t']))
             txtf.write(text)
 
         if t.save_sub:
@@ -1581,7 +1580,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             with open(fname, 'w') as txtf:
                 # this assumes you did wavelength calibration
                 txtf.write('wave\tflux\terror\tfor each subexposure number\n')
-                txtf.write('Start-time: {} \n'.format(reduced_exposure.Primary.header['t']))
+                txtf.write('Observation-time: {} \n'.format(reduced_exposure.Primary.header['t']))
                 for line in lines:
                     txtf.write(line)
 
@@ -1668,7 +1667,7 @@ def create_orbit_cats_gauss(data_dir='/home/jacob/hst_data/GJ-1214/', conf_file=
             else:
                 # X02b data has the direct image spatially scanned
                 # use the first read of the _ima before scanning as direct image
-                flt_fname = data_dir + fname.split('_')[0] + '_ima.fits'
+                flt_fname = data_dir + 'direct_images_ima/' + fname.split('_')[0] + '_ima.fits'
                 di = data.load(flt_fname, hst_file=conf_kwargs['hst_eph_file'], tai_file=conf_kwargs['tai_utc_file'])
                 full_images = [read.SCI.data.copy() for read in di.reads]
                 full_images = [image[5:-5, 5:-5] for image in full_images]  # trim off reference pixels

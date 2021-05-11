@@ -1231,22 +1231,34 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a = 12.0647  # Semi-major axis scaled by stellar radius
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'HAT-P-2':
-        # Below are rough paramaters for HAT-P-2 b system from https://arxiv.org/pdf/1702.03797.pdf
-        per = 5.6334675#5.6334729
-        params.t0 = 2455288.84969  # 2455288.84923
+        # Below are rough paramaters for HAT-P-2 b system from https://arxiv.org/pdf/1702.03797.pdf (W)
+        # and https://arxiv.org/pdf/0908.1705.pdf (P)
+        per = 5.6334675  #(W)
+        params.t0 = 2455288.84969  #(W)
         #params.t_secondary = 2455289.93211 - 2455288.84923
         #params.t_periapse = 2455289.4721 - 2455288.84923
         params.per = per  # orbital period
-        params.rp = 0.07695  # Rp/Rs, mean 0.0142
-        params.a = 9.72  # semi-major axis (a/Rs), mean 2.0
-        params.inc = 86.7  # orbital inclination (in degrees)
-        params.ecc = 0.51023#0.5171  # eccentricity
-        params.w = 188.44#185.22  # longitude of periastron (in degrees)
+        params.rp = 0.07227  # Rp/Rs (P)
+        params.a = 8.99  # semi-major axis (a/Rs), (P)
+        params.inc = 86.72  # orbital inclination (in degrees) (P)
+        params.ecc = 0.51023  #  # eccentricity (W)
+        params.w = 188.44  # longitude of periastron (in degrees) (W)
         params.limb_dark = "linear"  # limb darkening model
-        params.u = [0.55]  # stellar limb darkening coefficients
+        params.u = [0.25]  # stellar limb darkening coefficients (-)
         params.t_secondary = 55289.4734 - 55288.84988  # from https://arxiv.org/pdf/1302.5084.pdf
-        params.fp = 199.5e-6  # secondary eclipse depth, wave/temp dependent
-        params.Hmag = 7.652
+        params.Hmag = 7.652  #(-)
+        params.a_abs = 0.06878  #(P)
+        params.m_p = 9.09  #M_jup (P)
+        params.r_p = 1.157  #R_jup (P)
+        params.r_s = 1.64  #R_sun (P)
+        params.m_s = 1.36  #M_sun (P)
+        params.T_s = 6290  #K (T_eff) (P)
+        params.pulse_alpha1 = 35.  #(W)
+        params.pulse_beta1 = 0.
+        params.pulse_Pi1 = per / 79.
+        params.pulse_alpha2 = 28.  #(W)
+        params.pulse_beta2 = 0.
+        params.pulse_Pi2 = per / 91.
     elif system == 'WASP-121':
         # Below are paramaters for WASP-121 b system
         per = 1.2749255
@@ -1347,7 +1359,6 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.inc = 87.2  #A Best method and more precise than #W  #3sigma: 85.41#
         params.ecc = 0.0  #W Eccentricity
         params.rp = 0.081  #A Best method  #3sigma 0.087#
-        params.rs = 2.39  #Solar radii  #A
         params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
         params.pulse_alpha = 31.9
@@ -1528,7 +1539,21 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a = 22.21  # Most precise Semi-major axis scaled by stellar radius
         params.Teq = 637
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
-
+    elif system == 'HD 80606':
+        #https://arxiv.org/pdf/0906.5605.pdf
+        per = 111.4367
+        params.t0 = 2454424.852
+        params.t_secondary = params.t0 + per / 2.
+        params.per = per  # orbital period
+        params.rp = 0.103 #0.98 * cs.R_jup.value / (0.978 * cs.R_sun.value)  # Rp/Rs, mean 0.0142
+        params.a =  98.72 # semi-major axis (a/Rs)
+        params.inc = 89.32  # orbital inclination (in degrees)
+        params.ecc = 0.9332  # eccentricity
+        params.w = 300.80  # longitude of periastron (in degrees)
+        params.limb_dark = "linear"  # limb darkening model
+        params.u = [0.28]  # stellar limb darkening coefficient
+        params.Teq = 405
+        params.T_s = 5561
 
 
     else:

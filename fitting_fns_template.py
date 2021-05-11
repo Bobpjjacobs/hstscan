@@ -878,7 +878,7 @@ def Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params):
     if Stel_puls_amp != 0.:
         if not np.all([hasattr(sp_params, 'pulse_alpha'), hasattr(sp_params, 'pulse_beta'),
                        hasattr(sp_params, 'pulse_Pi')]):
-            print "The planet instance has not the right parameters for stellar pulsations."
+            print "The planet instance does not have the right parameters for stellar pulsations."
             print "Check the KELT-9b example"
         alpha = Stel_puls_amp * sp_params.pulse_alpha
         beta = Stel_puls_amp * sp_params.pulse_beta
@@ -889,7 +889,7 @@ def Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params):
     if Harm_amp != 0.:
         if not np.all([hasattr(sp_params, 'harm_A1'), hasattr(sp_params, 'harm_A2'), hasattr(sp_params, 'harm_B2'),
                        hasattr(sp_params, 'harm_A3'), hasattr(sp_params, 'harm_B3')]):
-            print "The planet instance has not the right parameters for harmonics."
+            print "The planet instance does not have the right parameters for harmonics."
             print "Check the KELT-9b example"
             A1 = sp_params.harm_A1
             A2 = sp_params.harm_A2
@@ -1975,8 +1975,14 @@ class Planet:
         else:
             fit_params_t0.add('aRs', value=self.sp_params.a, max=self.sp_params.a * 1.2, min=self.sp_params.a * 0.8)
         if fix_limb_dark or not Transit:
-            fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
-            fit_params_t0.add('u2', value=self.sp_params.u[1], vary=False)
+            if len(self.sp_params.u) == 1. and not limb_dark == 'linear':
+                print "Only one limb darkening parameter was given, reverting to linear limb darkening"
+                fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
+                fit_params_t0.add('u2', value=0., vary=False)
+                lself.sp_params.limb_dark = 'linear'
+            else:
+                fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
+                fit_params_t0.add('u2', value=self.sp_params.u[1], vary=False)
         else:
             fit_params_t0.add('u1', value=self.sp_params.u[0], max=1., min=0.)
             if limb_dark == 'linear':
@@ -2252,8 +2258,14 @@ class Planet:
         else:
             fit_params_t0.add('aRs', value=self.sp_params.a, max=self.sp_params.a * 1.2, min=self.sp_params.a * 0.8)
         if fix_limb_dark or not Transit:
-            fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
-            fit_params_t0.add('u2', value=self.sp_params.u[1], vary=False)
+            if len(self.sp_params.u) == 1. and not limb_dark == 'linear':
+                print "Only one limb darkening parameter was given, reverting to linear limb darkening"
+                fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
+                fit_params_t0.add('u2', value=0., vary=False)
+                self.sp_params.limb_dark = 'linear'
+            else:
+                fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
+                fit_params_t0.add('u2', value=self.sp_params.u[1], vary=False)
         else:
             fit_params_t0.add('u1', value=self.sp_params.u[0], max=1., min=0.)
             if limb_dark == 'linear':

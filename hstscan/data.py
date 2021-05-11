@@ -554,7 +554,8 @@ def find_star_in_catalogue(catalogue, di_name, t, logger):
 
 def read_spec(fname, wmin=-np.inf, wmax=np.inf):
     with open(fname,'r') as g:
-        g.readline() # header
+        g.readline() # header# header
+        g.readline() # second header line
         lines = g.readlines()
         lines = [line.strip('\n') for line in lines]
     lines = [[float(p) for p in line.split('\t')] for line in lines]

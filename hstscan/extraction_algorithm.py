@@ -143,13 +143,16 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
 
 
     if pixshift > 3.:
-        logger.warning('The shift in pixels is rather large. The flat-field on this exposure may not have been' +
+        logger.warning('The shift in pixels is rather large. The flat-field on this exposure may not have been ' +
                        'working optimally.')
+    specX_orig = [spec.x.copy() for spec in spectra]
+    print spec.x[0], specX_orig[0]
     for spec in spectra:
         if Stretch:
             spec.x = spec.x / refstretch - refshift
         else:
             spec.x -= refshift
+    print spec.x[0], specX_orig[0]
 
 
     if t.debug:
@@ -170,10 +173,10 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
         else:
             x_stellar_line = find_stellar_line(x_ref, y_spec, w_ref1 = t.telescope.w_ref1, w_ref2=t.telescope.w_ref2)
         xstart, xend = x_stellar_line - 7, x_stellar_line + 7
-        y_interp = np.interp(x_ref, spec.x, y_spec)
-        data.plot_data(x=[x_ref[xstart:xend], spec.x[xstart:xend], x[xstart:xend], x_ref[xstart:xend]],
-                        y=[y_ref[xstart:xend], y_spec[xstart:xend] * scale,
-                           y_spec[xstart:xend] * scale, y_interp[xstart:xend] * scale],
+        y_interp = np.interp(x_ref, spectra[s].x, spectra[s].y)
+        data.plot_data(x=[x_ref[xstart:xend], spectra[s].x[xstart:xend], specX_orig[s][xstart:xend], x_ref[xstart:xend]],
+                        y=[y_ref[xstart:xend], spectra[s].y[xstart:xend] * scale,
+                           spectra[s].y[xstart:xend] * scale, y_interp[xstart:xend] * scale],
                         label=['Reference', 'Shifted', 'Original', 'Interpolated shift'], marker=['o', 'x', 's', '^'])
         if t.Zoom_wavelength:
             p.plot([t.Zoom_wavelength, t.Zoom_wavelength], [min(y_ref[xstart:xend]), max(y_ref[xstart:xend])], '--')
