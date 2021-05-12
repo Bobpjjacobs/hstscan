@@ -295,6 +295,11 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
   object_unit_y = np.cos(dec) * np.sin(ra)
   object_unit_z = np.sin(dec)
 
+  print "radec K9", ra, dec
+  print obsx, obsy, obsz
+  print "ra = ", 90 + np.arctan2(-obsx, obsy) / np.pi * 180.
+  print "dec = ", np.arctan2(np.sqrt(obsy**2. + obsx**2.), obsz) / np.pi * 180
+  print object_unit_x, object_unit_y, object_unit_z
 
   # Dot product the vectors with n_hat
   rdotnhat = ( obsx * object_unit_x +
@@ -304,6 +309,7 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
 
   # Reshape back to the original shape
   rdotnhat = rdotnhat.reshape(tshape)
+  print rdotnhat, "radec",
 
   # Time correction is: dt = length/velocity
   # Divide by the speed of light and return

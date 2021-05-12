@@ -218,7 +218,7 @@ class Data_ima():
             # Now do the timing corrections
             if bjd:
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
+                bjd_dt = timecorr.suntimecorr(RA / 180. * np.pi, DEC / 180. * np.pi, np.array(jd_utc), hst_file)
 
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
@@ -226,6 +226,7 @@ class Data_ima():
                 self.t = jd_utc + dt/60./60./24. # in days
                 self.dt = dt # timing offset in seconds
                 self.t_units = 'BJD_TT'
+                print self.t, jd_utc, dt/60./60./24., bjd_dt/60., tdb_dt/60.
             else:
                 self.t = jd_utc
                 self.dt = 0
@@ -303,7 +304,7 @@ class Data_flt():
             if bjd:
                 # Now do the timing corrections
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
+                bjd_dt = timecorr.suntimecorr(RA / 180. * np.pi, DEC / 180. * np.pi, np.array(jd_utc), hst_file)
                 # 'js41_hst.vec' is the horizons ephemeris file for HST covering observation range
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
@@ -366,7 +367,7 @@ class Data_drz():
             # Now do the timing corrections
             if bjd:
                 # jd -> bjd
-                bjd_dt = timecorr.suntimecorr(RA, DEC, np.array(jd_utc), hst_file)
+                bjd_dt = timecorr.suntimecorr(RA / 180. * np.pi, DEC / 180. * np.pi, np.array(jd_utc), hst_file)
 
                 # utc -> tdb
                 tdb_dt = timecorr.jdutc2jdtdb(jd_utc, taifile=tai_file)
