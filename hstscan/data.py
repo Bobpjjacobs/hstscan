@@ -226,7 +226,7 @@ class Data_ima():
                 self.t = jd_utc + dt/60./60./24. # in days
                 self.dt = dt # timing offset in seconds
                 self.t_units = 'BJD_TT'
-                print self.t, jd_utc, dt/60./60./24., bjd_dt/60., tdb_dt/60.
+                #print self.t, jd_utc, dt/60./60./24., bjd_dt/60., tdb_dt/60.
             else:
                 self.t = jd_utc
                 self.dt = 0
