@@ -299,7 +299,7 @@ def suntimecorr(ra, dec, obst,  coordtable, verbose=False):
   print obsx, obsy, obsz
   print "ra = ", 90 + np.arctan2(-obsx, obsy) / np.pi * 180.
   print "dec = ", np.arctan2(np.sqrt(obsy**2. + obsx**2.), obsz) / np.pi * 180
-  print object_unit_x, object_unit_y, object_unit_z
+  #print object_unit_x, object_unit_y, object_unit_z
 
   # Dot product the vectors with n_hat
   rdotnhat = ( obsx * object_unit_x +
