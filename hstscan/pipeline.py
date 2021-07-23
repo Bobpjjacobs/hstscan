@@ -147,6 +147,12 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             save_dir (str):     directory to store the reduced files
             write (bool):       whether to write the file or not
 
+            remove_subexps_list (list of integers): subexposure numbers that need to be removed from the total spectrum.
+                                                    This may be because this subexposure is unreliable due to e.g. a
+                                                    satellite crossing event.
+                                                    This subexposure will STILL appear in the file with all subexposures
+                                                    This does not affect the timing of the exposure
+
             use_2nd_order (bool): Whether to use the second order of the spectrum to fit the position of the spectrum
                                    on the detector.
 
@@ -180,7 +186,9 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             CR_thresh (float): threshold, in electrons, for CR hit detection
             CR_x, CR_y (ints): number of pixels over which to check deviation
             CR_replace: change the value that replaces a CR pixel (local mean, median, NaN...)
-            cr_persistence: (bool) Whether too mark CRs as DQ pixels in subsequent subexposures.
+            cr_persistence: (bool) Whether to mark CRs as DQ pixels in subsequent subexposures.
+            cr_deficiency: (bool) Whether to mask pixels that are CR_tolx/CR_toly times BELOW the median. These are masked
+                                   as DQ pixels
 
             ext_wshift (int): number of pixels with which to shift the wavelength solution manually.
             abs_wshift (bool): whether to use an absolute wavelength solution estimated by a fit to a stellar model.
@@ -224,7 +232,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                'postarg_yguess':True, 'yguess_offset_f': -25, 'yguess_offset_r': 0, 'default_scan':'f',
                'cr_local':True, 'cr_tolx':5, 'cr_toly':10, 'cr_replace':'median', 'cr_plot':False,
                'cr_x':5, 'cr_y':5, 'cr_thresh':50., 'cr_mask_dq':True,
-               'cr_master':False, 'cr_mname':None, 'cr_persistence': True,
+               'cr_master':False, 'cr_mname':None, 'cr_persistence': True, 'cr_deficiency': True,
                'dispersion':True, 'ref_exp':None, 'ref_wv0':0.9, 'ref_wv1':1.92, 'x':True,
                'wshift_from_postarg':False,
                #'tsiaras':True, 'peak':False, 'calc_abs_xshift': True, 'xshift_ext':0.,
@@ -237,7 +245,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                'trans_file2_g141':'None', 'tai_utc_file':'None',
                'stellar_spectrum':'None', 'stellar_wavelengths': 'None',
                'contam_thresh':0.01, 'hard_e_limit':1e10,
-               'object_ind':0}
+               'object_ind':0, 'remove_subexps_list':[]}
     # Read in conf_file and kwargs to update default toggle values
     # priority is kwargs > conf_file > default
     if conf_file:
@@ -745,7 +753,20 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             n_crs = np.count_nonzero(CR_mask)
             cr_values.append(CR_info['cr_vals'])
 
-            subexposure.SCI.data = CR_clean
+            if t.cr_deficiency:
+                Low_clean, Low_mask, Low_info = r.spatial_median_filter(CR_clean, ignore_mask,
+                                                                 tolx=t.cr_tolx, toly=t.cr_toly,
+                                                                 replace=t.cr_replace, \
+                                                                 debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh,
+                                                                 mask_dq=not t.cr_mask_dq,
+                                                                 hard_e_limit = t.hard_e_limit, Low=True) #Search for pixels that have a flux *deficiency*
+                subexposure.SCI.data = Low_clean
+                subexposure.DQ_mask = np.logical_or(subexposure.DQ_mask, Low_mask)
+                subexposure.mask = np.logical_or(subexposure.mask, Low_mask) #propagate CRs from previous subexposures as DQ flagged pixels.
+                print("nr_CRs, Lows", n_crs, np.count_nonzero(Low_mask))
+            else:
+                print("nr_CRs", n_crs)
+                subexposure.SCI.data = CR_clean
             subexposure.n_crs = n_crs
             subexposure.CR_mask = CR_mask
             subexposure.mask = np.logical_or(subexposure.mask, CR_mask)
@@ -986,6 +1007,11 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
 
     exposure.subexposures = subexposures
 
+    print(exposure.Primary.header['EXPTIME'])
+    exptime = exposure.Primary.header['EXPTIME']
+    exposure.Primary.header['EXPTIME'] = exptime / len(subexposures) * (len(subexposures) - len(t.remove_subexps_list))
+    print(exposure.Primary.header['EXPTIME'], exptime / len(subexposures) * (len(subexposures) - len(t.remove_subexps_list)))
+
     if t.pdf and t.debug:
         pdf.close()
 
@@ -1058,6 +1084,11 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             save_dir (str): destination to save the spectrum
             save_extension (str): _spec.txt default, extension for spectrum file
             save_sub (bool): save the subexposure spectra separately
+            remove_subexps_list (list of integers): subexposure numbers that need to be removed from the total spectrum.
+                                                    This may be because this subexposure is unreliable due to e.g. a
+                                                    satellite crossing event.
+                                                    This subexposure will STILL appear in the file with all subexposures
+                                                    This does not affect the timing of the exposure
 
             calc_var (bool): Calculate variances for the spectra or use ERR extension
             mask_neg (bool): can mask all the negative pixels in case of strong negative persistence
@@ -1120,7 +1151,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                'top_half':False, 'k_col':9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                'outliers_to_average':False, 'slopefactor':0.1, 'slope_second_order':False,
                'custom_knots_F':None, 'custom_knots_R':None, 'show_knots':False,
-               'wshift_to_ref':False, 'ref_exp': None, 'write':True
+               'wshift_to_ref':False, 'ref_exp': None, 'write':True, 'remove_subexps_list':[]
                }
     if conf_file:
         conf_kwargs = data.read_conf_file(conf_file)
@@ -1423,6 +1454,12 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         variances = [var for var, gd in zip(variances, good_subs) if gd == 1]
     else:
         good_subs = np.ones(len(Ps))
+        bad_subs = np.zeros(len(Ps))
+
+    if len(t.remove_subexps_list) > 0:
+        for subnr in t.remove_subexps_list:
+            bad_subs[subnr] = 1
+            good_subs[subnr] = 0
 
     reduced_exposure.spectra = spectra
     reduced_exposure.variances = variances
@@ -1489,17 +1526,16 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         variances = variancesnew
 
     # Compute total spectrum of combined subexposures
-    if len(interp_spectra) > 1:
-        #print("len", len(interp_spectra), scan_direction)
-        #if scan_direction == 1.:
-        #    y = np.nansum(np.array(interp_spectra)[[0,2,3]], axis=0)
-        #else:
-        #    y = np.nansum(np.array(interp_spectra)[[0,1,3]], axis=0)
-        y = np.nansum(interp_spectra, axis=0)
-        variance = np.nansum(variances, axis=0)
-    elif len(interp_spectra) == 1:
+    if len(np.array(interp_spectra)[good_subs.astype(bool)]) > 1:
+        y = np.nansum(np.array(interp_spectra)[good_subs.astype(bool)], axis=0)
+        variance = np.nansum(np.array(variances)[good_subs.astype(bool)], axis=0)
+    elif len(np.array(interp_spectra)[good_subs.astype(bool)]) == 1 and good_subs[0] == 1:
         y = interp_spectra[0]
         variance = variances[0]
+
+    #Rescale the exposure time if there are any bad subexposures
+    if sum(bad_subs) > 0:
+        logger.info('Ignoring subexposures {} for the full spectrum'.format(t.remove_subexps_list))
 
     # Rescale if ignore one or more subexposures
     if t.ignore_blobs:
@@ -1522,18 +1558,34 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                                   refshifterr=refshifterr)
 
     if t.debug and len(spectra) > 1:
-        fig = p.figure(figsize=(10,10))
-        p.subplot(211)
-        p.title('Subexposure spectra (above as extracted, below shifted and interpolated)')
+        fig = p.figure(figsize=(10,14))
+        p.subplot(311)
+        p.title('Subexposure spectra (above as extracted, middle shifted and interpolated, below relative difference with first subexposure)')
         for i, spec in enumerate(spectra):
-            spec.plot(show=False, label=i)
-        p.subplot(212)
+            if good_subs[i] == 1:
+                spec.plot(show=False, label=i)
+            else:
+                spec.plot(show=False, label=i, alpha=0.3)
+        p.subplot(312)
         for i, spec in enumerate(interp_spectra):
-            p.plot(x_ref, spec, label=i)
-        p.legend(fontsize='x-small')
+            if good_subs[i] == 1:
+                p.plot(x_ref, spec, label=i)
+            else:
+                p.plot(x_ref, spec, label=i, alpha=0.3)
+        p.ylabel('Electrons')
+        p.subplot(313)
+        for i, spec in enumerate(interp_spectra):
+            if good_subs[i] == 1:
+                p.plot(x_ref, spec / np.mean(interp_spectra, axis=0) / np.mean(spec / np.mean(interp_spectra, axis=0) ), label=i)
+            else:
+                p.plot(x_ref, spec / np.mean(interp_spectra, axis=0)  / np.mean(spec / np.mean(interp_spectra, axis=0) ), label=i, alpha=0.3)
+        if t.ignore_blobs:
+            p.plot(exp_spectrum.x, old_combined, ls='--', zorder=-1, label='Including bad spectra')
+        p.gca().set_ylim(0.9,1.1)
+        p.legend()
         fig.subplots_adjust(hspace=0)
         p.xlabel('Wavelength (microns)')
-        p.ylabel('Electrons')
+
         save_fig()
 
         p.plot(exp_spectrum.x, exp_spectrum.y, label='Combined spectrum')

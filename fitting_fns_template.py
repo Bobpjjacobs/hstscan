@@ -364,9 +364,9 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
             sp_params.limb_dark = "quadratic"  # limb darkening model #don't care
             sp_params.u = [u1, u2]  # stellar limb darkening coefficients
         #Adjust the time of secondary eclipse to the new time offset
-        sp_params.t_secondary = sp_params.t0 + t0 + sp_params.per / 2. * \
-                                     (1 + 4 * sp_params.ecc * np.cos(sp_params.w * np.pi / 180.))
-
+        m = batman.TransitModel(sp_params, t + t0)
+        sp_params.t_secondary = m.get_t_secondary(sp_params)
+        
         #Define the times when eclipse starts and ends
         t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = calc_eclipse_times(sp_params)
         t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)

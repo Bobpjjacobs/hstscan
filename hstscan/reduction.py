@@ -549,7 +549,7 @@ def has_blobs(mask, tol=4):
 
 
 def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='median', debug=False, mask_dq=False,
-                          thresh=50., hard_e_limit=1.e9):
+                          thresh=50., hard_e_limit=1.e9, Low=False):
     """
     Filter cosmic rays by using a local median of pixels
     First compute median in x and y, using sx and sy number of pixels either side
@@ -579,7 +579,6 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
             #stdimage = np.sqrt(np.nanmean((image_stacks - medimage)**2., axis=0))
             stdimage = np.sqrt(np.nanmedian((image_stacks - medimage)**2., axis=0))
             residuals = np.abs(image_stacks - medimage)
-            mask1 = np.abs(residuals) > 2 * stdimage
             #print "mask", np.sum(mask1), mask1.shape
             #stdimage2 = np.sqrt(np.nanmean((image_stacks[~mask1] - medimage)**2., axis=0))
             #print "shift", shift
@@ -640,10 +639,22 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
 
             # check if pixels are outliers
             #print image.shape
+
             residuals = np.abs(image - medimage)
             mask = np.abs(residuals) > tol * stdimage
             mask = np.logical_and(mask, residuals > thresh)
             mask = np.logical_or(mask, image > hard_e_limit)
+
+            """
+            residuals = image - medimage
+            if Low:
+                mask = residuals < -tol * stdimage
+                mask = np.logical_and(mask, residuals < -thresh)
+            else:
+                mask = residuals > tol * stdimage
+                mask = np.logical_and(mask, residuals > thresh)
+                mask = np.logical_or(mask, image > hard_e_limit)
+            """
 
             masks.append(mask);
             medimages.append(medimage)
@@ -654,7 +665,7 @@ def spatial_median_filter(image, dq_mask, tolx=5, toly=10, sx=5, sy=5, replace='
             masks.append(mask)
     #print error
 
-    mask = np.logical_and(masks[0], masks[1])  # flag if either are flagged
+    mask = np.logical_and(masks[0], masks[1])  # flag if both are flagged
 
     if not mask_dq: mask[dq_mask] = False  # dont want to count DQ pixels as CRs
     if replace == 'median':
@@ -1240,11 +1251,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.per = per  # orbital period
         params.rp = 0.07227  # Rp/Rs (P)
         params.a = 8.99  # semi-major axis (a/Rs), (P)
-        params.inc = 86.72  # orbital inclination (in degrees) (P)
+        params.inc = 86.16  # orbital inclination (in degrees) (W)
         params.ecc = 0.51023  #  # eccentricity (W)
         params.w = 188.44  # longitude of periastron (in degrees) (W)
-        params.limb_dark = "linear"  # limb darkening model
-        params.u = [0.25]  # stellar limb darkening coefficients (-)
+        params.limb_dark = "quadratic"  # limb darkening model
+        params.u = [0.25, 0.07]  # stellar limb darkening coefficients (-)
         params.t_secondary = 55289.4734 - 55288.84988  # from https://arxiv.org/pdf/1302.5084.pdf
         params.Hmag = 7.652  #(-)
         params.a_abs = 0.06878  #(P)
@@ -1256,9 +1267,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.pulse_alpha1 = 35.  #(W)
         params.pulse_beta1 = 0.
         params.pulse_Pi1 = per / 79.
+        params.pulse_phi1 = -0.014982139600846846
         params.pulse_alpha2 = 28.  #(W)
         params.pulse_beta2 = 0.
         params.pulse_Pi2 = per / 91.
+        params.pulse_phi2 = -0.013255503458503478
     elif system == 'WASP-121':
         # Below are paramaters for WASP-121 b system
         per = 1.2749255
@@ -1344,13 +1357,13 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         #### Following Borsa et al. 2019: https://arxiv.org/pdf/1907.10078.pdf
         # G: Following Gaudi et al. 2017: https://arxiv.org/pdf/1706.06723.pdf
         # A: Following Ahlers et al. 2020: https://arxiv.org/abs/2004.14812
-        # W: Following Wong et al. 2020: https://arxiv.org/abs/1910.01607
+        # W: Following Wong et al. 2021: https://arxiv.org/pdf/2106.02610.pdf  https://arxiv.org/abs/1910.01607
         per = 1.4811235  #W #Most precise
         params.t0 = 2458711.58627  #W #Newest
         params.per = per  # orbital period
         params.w = 90.  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "linear"  # limb darkening model #don't care
-        params.u = [0.55, 0.]  # stellar limb darkening coefficients
+        params.u = [0.1931]  # https://www.aanda.org/articles/aa/pdf/2011/05/aa16451-11.pdf
         #params.fp = 5.e-4  # secondary eclipse depth, wave/temp dependent
         params.Hmag = 7.492  #Simbad
         params.a_abs = 0.03547  # The absolute value of the semi-major axis [AU]
@@ -1361,9 +1374,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.rp = 0.081  #A Best method  #3sigma 0.087#
         params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
-        params.pulse_alpha = 31.9
-        params.pulse_beta = -109.5
-        params.pulse_Pi = 7.58695 / 24.
+        params.pulse_alpha = 96.6#31.9
+        params.pulse_beta = 86.4#-109.5
+        params.pulse_Pi = 7.5851 / 24. #7.58695 / 24.
+        params.A_ellips = 38 #ppm Calculated with W plus https://www.aanda.org/articles/aa/pdf/2011/05/aa16451-11.pdf
+        params.A_dopp = 1.6 #ppm #Calculated from Shporer 2017
         params.harm_A1 = 21.0
         params.harm_A2 = -35.7
         params.harm_B2 = 16.1

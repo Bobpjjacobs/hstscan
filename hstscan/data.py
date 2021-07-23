@@ -1187,6 +1187,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
         line_dat.sort()
         lines = '\n'.join(['\t'.join(dat) for dat in line_dat])
         f.silentremove(data_dir+'/visit_'+no+'.lis')
+        print(data_dir+'/visit_'+no+'.lis')
         with open(data_dir+'/visit_'+no+'.lis', 'w') as g:
             g.write(lines)
             g.write('\n')
