@@ -61,14 +61,17 @@ class Empty_logger():
     def debug(self, x): print(x)
 
 
-def arrays_plot(arrays, name='Read', tight_layout=True, size=3, height=1, show=True, **kwargs):
+def arrays_plot(arrays, name='Read', tight_layout=True, size=3, height=1, show=True, titles=[], **kwargs):
     """Neatly plot a list of arrays, using data.view_frame_image"""
     view = data.view_frame_image
     nrows = np.ceil(len(arrays) / 4.)
     if len(arrays) > 1: rcParams['figure.figsize'] = size * 4, size * nrows * height
     for i, array in enumerate(arrays):
         if len(arrays) > 1: p.subplot(nrows, 4, i + 1)
-        view(array, show=False, **kwargs)
+        if len(titles)> 0:
+            view(array, show=False, title=titles[i], **kwargs)
+        else:
+            view(array, show=False, **kwargs)
         if not name is None: p.title('{} {}'.format(name, i))
         p.axis('off')
     if tight_layout: p.tight_layout()
@@ -369,22 +372,38 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             subexposures.append(subexposure)
 
     # Background removal
+    cr_previous = np.zeros_like(subexposures[0].SCI.data, dtype=bool)
+    bg_cr_masks = []
     for i, subexp in enumerate(subexposures):
-        subexposures[i], bg_mask = r.background_removal(i, subexp, t, logger)
+        subexposures[i], bg_mask, bg_cr_mask = r.background_removal(i, subexp, cr_previous, t, logger)
+        cr_previous = bg_cr_mask
+        bg_cr_masks.append(bg_cr_mask)
 
     # Show background area
     if t.debug and t.bg:
         if t.bg_area:
             view(exposure.reads[0].SCI.data, show=False, vmin=0, vmax=8 * exposure.Primary.header['EXPTIME'],
-                 title='Background Area', bg_mask = bg_mask, cmap='viridis', origin='lower')
+                 title='Background Area', bg_mask=bg_mask, cmap='viridis', origin='lower')
             save_fig()
 
             # Plot of areas used for bg in each subexposure
+            bg_plot_titles = ['Bg area at time {}'.format(subexposure.SCI.header['SAMPTIME']) for subexposure in subexposures]
             arrays_plot([np.reshape(sub.SCI.data[bg_mask.astype(bool)], (t.bg_h, t.bg_w)) for sub in subexposures],
                         name=None, cbar=False, size=4, height=t.bg_h / float(t.bg_w), tight_layout=False, vmin=0.,
-                        vmax= exposure.Primary.header['EXPTIME'], show=False)
+                        titles=bg_plot_titles, vmax= exposure.Primary.header['EXPTIME'], show=False)
             p.suptitle('Bg Area for each subexposure')
             save_fig()
+
+            # Plot of CR masks for backgrounds.
+            if t.bg_plot:
+                bg_plot_titles = ['Bg mask at time {}'.format(subexposure.SCI.header['SAMPTIME']) for subexposure in subexposures]
+                arrays_plot([np.reshape(bg_cr_masks[i], (t.bg_h, t.bg_w)) for i,sub in enumerate(subexposures)],
+                        name=None, cbar=False, size=4, height=t.bg_h / float(t.bg_w), tight_layout=False, vmin=0.,
+                        titles=bg_plot_titles, show=False)
+                p.suptitle('Bg cr masks for each subexposure')
+                save_fig()
+
+
 
         # Plot of backgrounds over time
         bgs = [np.median(subexposure.bg) for subexposure in subexposures]

@@ -438,7 +438,7 @@ def calc_image_background(image, box_h, psf_h, debug=False, above=False):
     return full_bg  # array
 
 
-def background_removal(i, subexposure, t, logger=None):
+def background_removal(i, subexposure, cr_previous, t, logger=None):
     if t.bg:
         if t.bg_area:
             # Using a fixed area of the detector to calculate bg mean
@@ -451,11 +451,51 @@ def background_removal(i, subexposure, t, logger=None):
             bg_image = subexposure.SCI.data[np.array(bg_mask.astype(bool))]
             bg_image = bg_image[np.isfinite(bg_image)]
             bg_image = bg_image.reshape((t.bg_h, t.bg_w))
+            if cr_previous.shape == subexposure.SCI.data.shape:
+                cr_previous = cr_previous[np.array(bg_mask.astype(bool))]
+            else:
+                cr_previous = cr_previous[np.ones_like(cr_previous)]
 
+            """
             bg_dq_mask = subexposure.mask[np.array(bg_mask.astype(bool))]
             CR_clean, CR_mask, CR_info = spatial_median_filter(bg_image, bg_dq_mask.reshape((t.bg_h, t.bg_w)),
                                                                tolx=t.cr_tolx, toly=t.cr_toly, replace=t.cr_replace, \
                                                                  debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh)
+            """
+
+            if t.cr_persistence:
+                bg_dq_mask  = np.logical_or(subexposure.mask[np.array(bg_mask.astype(bool))], cr_previous) #propagate CRs from previous subexposures as DQ flagged pixels.
+            ignore_mask = subexposure.mask[np.array(bg_mask.astype(bool))]  # dont flag already masked pixels
+            CR_clean, CR_mask, CR_info = spatial_median_filter(bg_image, ignore_mask.reshape((t.bg_h, t.bg_w)),
+                                                                 tolx=t.cr_tolx, toly=t.cr_toly,
+                                                                 replace=t.cr_replace, \
+                                                                 debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh,
+                                                                 mask_dq=not t.cr_mask_dq,
+                                                                 hard_e_limit = t.hard_e_limit)
+
+
+            if t.cr_deficiency:
+                Low_clean, Low_mask, Low_info = spatial_median_filter(CR_clean, ignore_mask.reshape((t.bg_h, t.bg_w)),
+                                                                 tolx=t.cr_tolx, toly=t.cr_toly,
+                                                                 replace=t.cr_replace, \
+                                                                 debug=False, sx=t.cr_x, sy=t.cr_y, thresh=t.cr_thresh,
+                                                                 mask_dq=not t.cr_mask_dq,
+                                                                 hard_e_limit = t.hard_e_limit, Low=True) #Search for pixels that have a flux *deficiency*
+                CR_mask = np.logical_or(CR_mask, Low_mask)
+
+            if t.debug and t.bg_plot:
+                BG_temp = bg_image.copy()
+                BG_temp[CR_mask] = np.nan
+                BG_binned_median = [np.mean(np.nanmedian(bg_image, axis=1)[j*5:j*5+5]) for j in range(bg_image.shape[0] - 5)]
+                BG_temp_binned_median = [np.mean(np.nanmedian(BG_temp, axis=1)[j*5:j*5+5]) for j in range(bg_image.shape[0] - 5)]
+                #p.errorbar(np.arange(BG_temp.shape[0]), np.nanmedian(bg_image, axis=1), np.sqrt(np.nanmedian(bg_image, axis=1)), fmt='o', label='original', alpha=0.3)
+                #p.errorbar(np.arange(BG_temp.shape[0]), np.nanmedian(BG_temp, axis=1), np.sqrt(np.nanmedian(BG_temp, axis=1),), fmt='o', label='CR removed', alpha=0.3)
+                p.errorbar(np.arange(len(BG_binned_median)), BG_binned_median, np.sqrt(BG_binned_median), fmt='o', label='original', alpha=0.3)
+                p.errorbar(np.arange(len(BG_binned_median)), BG_temp_binned_median, np.sqrt(BG_temp_binned_median), fmt='o', label='CR removed', alpha=0.3)
+                p.title('Median background levels for subexposure {}'.format(i))
+                p.legend()
+                p.show()
+
 
             bg, bg_err = np.nanmedian(bg_image[~CR_mask]), np.nanstd(bg_image[~CR_mask])
         else:
@@ -467,11 +507,8 @@ def background_removal(i, subexposure, t, logger=None):
             bg, bg_err = calc_subexposure_background(subexposure, method='median', masks=t.n_masks, \
                                                        debug=t.bg_plot, neg_masks=t.neg_masks, mask_h=t.mask_h,
                                                        psf_w=t.psf_w, psf_h=psf_h, show=not t.pdf)
-            if t.bg_plot and False:
-                p.subplot(1, 2, 1)
-                p.title('Subexposure {}'.format(i))
-                save_fig()
-            t.bg_plot = False
+
+
 
         bg = np.ones_like(subexposure.SCI.data) * bg
         if logger:
@@ -491,7 +528,7 @@ def background_removal(i, subexposure, t, logger=None):
     subexposure.SCI.header['BG'] = np.median(bg)
     subexposure.SCI.header['BG_ERR'] = bg_err
 
-    return subexposure, bg_mask
+    return subexposure, bg_mask, CR_mask
 
 
 ########################################
@@ -1226,8 +1263,9 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.fp = 1e-4  # secondary eclipse depth, wave/temp dependent
     elif system == 'WASP-80':
         # Below are rough paramaters for WASP-80b system Based on Sedaghati et al. 2017 unless otherwise stated
-        per = 3.067860  ##Parvianien et al. 2017 Period [days]
-        params.t0 = 2456459.809578  # Central time of PRIMARY transit BJD [days]
+        # [K] = https://arxiv.org/pdf/2110.13863.pdf
+        per = 3.067865271  ## \pm 0.00000019 [K] Period [days]
+        params.t0 = 2456671.49615  # \pm 0.00004[K] Central time of PRIMARY transit BJD [days]
         # From Triaud paper 2454664.90531 -0.00016/+0.00017  BJD
         params.per = per  # orbital period
         params.w = 94.  # longitude of periastron (in degrees)
@@ -1239,6 +1277,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.inc = 88.90  # Inclination [degrees]
         params.ecc = 0.002  ##Triaud Eccentricity
         params.rp = 0.17386  # Planet to star radius ratio
+        params.m_p = 0.554  #M_jup (P)
+        params.r_p = 0.952  #R_jup (P)
+        params.r_s = 0.63  #R_sun (P)
+        params.m_s = 0.58  #M_sun (P)
+        params.T_s = 4145  #K (T_eff) (P)
         params.a = 12.0647  # Semi-major axis scaled by stellar radius
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'HAT-P-2':
@@ -1250,12 +1293,12 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         #params.t_periapse = 2455289.4721 - 2455288.84923
         params.per = per  # orbital period
         params.rp = 0.07227  # Rp/Rs (P)
-        params.a = 8.99  # semi-major axis (a/Rs), (P)
+        params.a = 8.99628131  #\pm 0.138 semi-major axis (a/Rs), (calculated from W using rho_s and eq 11 in P)
         params.inc = 86.16  # orbital inclination (in degrees) (W)
         params.ecc = 0.51023  #  # eccentricity (W)
         params.w = 188.44  # longitude of periastron (in degrees) (W)
         params.limb_dark = "quadratic"  # limb darkening model
-        params.u = [0.25, 0.07]  # stellar limb darkening coefficients (-)
+        params.u = [0.133, 0.241]  # stellar limb darkening coefficients, calculated with ExoCTK (-), linear: 0.31
         params.t_secondary = 55289.4734 - 55288.84988  # from https://arxiv.org/pdf/1302.5084.pdf
         params.Hmag = 7.652  #(-)
         params.a_abs = 0.06878  #(P)
@@ -1267,11 +1310,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.pulse_alpha1 = 35.  #(W)
         params.pulse_beta1 = 0.
         params.pulse_Pi1 = per / 79.
-        params.pulse_phi1 = -0.014982139600846846
+        params.pulse_phi1 = -0.00861091#-0.014982139600846846
         params.pulse_alpha2 = 28.  #(W)
         params.pulse_beta2 = 0.
         params.pulse_Pi2 = per / 91.
-        params.pulse_phi2 = -0.013255503458503478
+        params.pulse_phi2 = 0.00882145#-0.013255503458503478
     elif system == 'WASP-121':
         # Below are paramaters for WASP-121 b system
         per = 1.2749255
@@ -1372,6 +1415,10 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.inc = 87.2  #A Best method and more precise than #W  #3sigma: 85.41#
         params.ecc = 0.0  #W Eccentricity
         params.rp = 0.081  #A Best method  #3sigma 0.087#
+        params.r_s = 2.418  #R_sun
+        params.m_s = 2.32   #M_sun
+        params.r_p = 1.936  #R_jup
+        params.m_p = 2.88   #M_jup
         params.a = 3.191  #W Most precise Semi-major axis scaled by stellar radius  #3sigma  3.116#
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
         params.pulse_alpha = 96.6#31.9
@@ -1569,6 +1616,35 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.u = [0.28]  # stellar limb darkening coefficient
         params.Teq = 405
         params.T_s = 5561
+    elif system == 'TOI-3362':
+        # https://arxiv.org/pdf/2109.03771.pdf
+        per = 18.09647  #(W)
+        params.t0 = 2458529.325  #(W)
+        #params.t_secondary = 2455289.93211 - 2455288.84923
+        #params.t_periapse = 2455289.4721 - 2455288.84923
+        params.per = per  # orbital period
+        params.rp = 0.06413  # Rp/Rs (P)
+        params.a = 17.978  # semi-major axis (a/Rs), (P)
+        params.inc = 89.14  # orbital inclination (in degrees) (W)
+        params.ecc = 0.815  #  # eccentricity (W)
+        params.w = 50.873  # longitude of periastron (in degrees) (W)
+        params.limb_dark = "quadratic"  # limb darkening model
+        params.u = [0.111, 0.251]  # stellar limb darkening coefficients, calculated with ExoCTK (-), linear: 0.31
+        params.Hmag = 9.719  #(-)
+        params.a_abs = 0.153  #(P)
+        params.m_p = 5.029  #M_jup (P)
+        params.r_p = 1.142  #R_jup (P)
+        params.r_s = 1.83  #R_sun (P)
+        params.m_s = 1.445  #M_sun (P)
+        params.T_s = 6532  #K (T_eff) (P)
+        params.pulse_alpha1 = 0.
+        params.pulse_beta1 = 0.
+        params.pulse_Pi1 = per / 79.
+        params.pulse_phi1 = -0.00861091#-0.014982139600846846
+        params.pulse_alpha2 = 0.
+        params.pulse_beta2 = 0.
+        params.pulse_Pi2 = per / 91.
+        params.pulse_phi2 = 0.00882145#-0.013255503458503478
 
 
     else:

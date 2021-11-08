@@ -279,7 +279,7 @@ def linear(xdata, m, b):
 def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, V2_R, f0_F, f0_R, Rorb1_F, Rorb1_R,
                      Rorb2_F, Rorb2_R, tau_F, tau_R, SatF, V1_F, V1_R, V3_F, V3_R, Forward, sp_params, orbit_times,
                      satellite_time, Include, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., exptime=90.,
-                     fit=True):
+                     incl_first_orbit=False, fit=True):
         """
         A function with an exponential ramp model for each orbit for a light curve with an eclipse.
         The first orbit should already have been discarded before applying this function.
@@ -287,7 +287,7 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         :param t: (np.array) The observation times of the exposures (BJD)
         :param depth_f: (float) Eclipse depth of forward scanned data
         :param depth_r: (float) Eclipse depth of reverse scanned data
-        :param t0: (float) Mid-transit time offset (BJD)
+        :param t0: (float) Mid-transit time offset (days)
         :param inc: (float) orbital inclination in degrees
         :param ecc: (float) orbital eccentricity
         :param aRs: (float) semi-major axis in stellar radii
@@ -326,6 +326,7 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         :param Harm_amp: (float) Amplitude of first and secondary harmonics relative to the baked-in values in
                          Stellar_signal
         :param exptime: (float) Exposure time in seconds
+        :param incl_first_orbit: (bool) Whether the first orbit of the visit is included in the data. (default=False)
         :param fit: Whether the call to this function is used to fit data. (else it's assumed to plot the data)
 
         :return:
@@ -354,6 +355,11 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         Direction_ = [Forward, ~Forward]
         t = np.array(t)
 
+        if incl_first_orbit:
+            k = 0
+        else:
+            k = 1
+
         sp_params.inc = inc
         sp_params.ecc = ecc
         sp_params.a = aRs
@@ -366,28 +372,20 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         #Adjust the time of secondary eclipse to the new time offset
         m = batman.TransitModel(sp_params, t + t0)
         sp_params.t_secondary = m.get_t_secondary(sp_params)
-        
-        #Define the times when eclipse starts and ends
-        t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = calc_eclipse_times(sp_params)
-        t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)
-        t_ing_ = (t - t_ing_s) / (t_ecl_s - t_ing_s)
-        eclipse_ = (t > t_ecl_s) & (t < t_ecl_e)
 
-        #Make boolean masks for first part and second part of egress and first and second part of ingress.
-        egress1_ = (t_egr_ > 0) & (t_egr_ < 0.5)
-        egress2_ = (t_egr_ >= 0.5) & (t_egr_ < 1.)
-        ingress1_ = (t_ing_ > 0) & (t_ing_ < 0.5)
-        ingress2_ = (t_ing_ >= 0.5) & (t_ing_ < 1.)
 
         #Make boolean masks for the first orbit and all other orbits.
         orbits = []
         for ot in orbit_times:
             orbits.append((t >= ot[0]) & (t < ot[1]))
-        Firstorbit = orbits[1]
-        Otherorbits = np.any(orbits[2:], axis=0)
+        Firstorbit = orbits[k]
+        #if not fit:
+        #    print t[Firstorbit]
+        #    print Firstorbit
+        Otherorbits = np.any(orbits[k+1:], axis=0)
         torb1 = t[Firstorbit] - t[Firstorbit][0]
         torb2 = []
-        for orb in orbits[2:]:
+        for orb in orbits[k+1:]:
             torb2.extend(t[orb] - t[orb][0])
         torb2 = np.array(torb2)
 
@@ -401,17 +399,9 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
 
         for depth, V1, V2, V3, f0, Rorb1, Rorb2, tau, Direction in zip(depth_, V1_, V2_, V3_, f0_, Rorb1_, Rorb2_, tau_, Direction_):
             #Forward or reverse
-            t_egr = t_egr_ * Direction
-            t_ing = t_ing_ * Direction
-            eclipse = eclipse_ * Direction
-            egress1 = egress1_ * Direction
-            egress2 = egress2_ * Direction
-            ingress1 = ingress1_ * Direction
-            ingress2 = ingress2_ * Direction
 
-            psi_p = Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1,
-                                     egress2, phi, depth, V1, sp_params) - 1
-            psi_s = Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params)
+            psi_p = Planetary_signal(t, phi, depth, V1, t0, sp_params, fit=fit)
+            psi_s = Stellar_signal(t, Stel_puls_amp1, Stel_puls_phase1, Stel_puls_amp2, Stel_puls_phase2, Harm_amp, t0, sp_params)
             S[Firstorbit] = ((1 + V2 * (t[Firstorbit] - t[0]) + V3 * (t[Firstorbit] - t[0])**2.) *
                              (1 - Rorb1 * np.exp(-torb1 / tau)))  #Systematics
             S[Otherorbits] = ((1 + V2 * (t[Otherorbits] - t[0]) + V3 * (t[Otherorbits] - t[0])**2.) *
@@ -436,15 +426,14 @@ def Func_exp_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
             else:
                 depth = depth_r
                 V1 = V1_R
-            entire_phase = 1 + Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr_, t_ing_, eclipse_, ingress1_, ingress2_,
-                                                egress1_, egress2_, phi, depth, V1, sp_params)
+            entire_phase = 1 + Planetary_signal(t, phi, depth, V1, t0, sp_params)
             return np.real(f_m), np.real(psi_s), np.real(baseline_w_eclipse), np.real(entire_phase)
 
 
 def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, V2_R, f0_F, f0_R, Rorb1_F, Rorb1_R,
                      Rorb2_F, Rorb2_R, tau_F, tau_R, SatF, V1_F, V1_R, V3_F, V3_R, Forward, sp_params, orbit_times,
                      satellite_time, Include, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., exptime=90.,
-                     fit=True):
+                     incl_first_orbit=False, fit=True):
         """
         A function with an exponential ramp model for each orbit for a transit light curve.
         The first orbit should already have been discarded before applying this function.
@@ -452,7 +441,7 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         :param t: (np.array) The observation times of the exposures (BJD)
         :param depth_f: (float) Eclipse depth of forward scanned data
         :param depth_r: (float) Eclipse depth of reverse scanned data
-        :param t0: (float) Mid-transit time offset (BJD)
+        :param t0: (float) Mid-transit time offset (days)
         :param inc: (float) orbital inclination in degrees
         :param ecc: (float) orbital eccentricity
         :param aRs: (float) semi-major axis in stellar radii
@@ -491,6 +480,7 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         :param Harm_amp: (float) Amplitude of first and secondary harmonics relative to the baked-in values in
                          Stellar_signal
         :param exptime: (float) Exposure time in seconds
+        :param incl_first_orbit: (bool) Whether the first orbit of the visit is included in the data. (default=False)
         :param fit: Whether the call to this function is used to fit data. (else it's assumed to plot the data)
 
         :return:
@@ -508,6 +498,11 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
                      (i.e. what is observed)
                    - numpy array of length t with only planetary light curve
         """
+        if incl_first_orbit:
+            k = 0
+        else:
+            k = 1
+
         depth_ = [depth_f, depth_r]
         V1_ = [V1_F, V1_R]
         V2_ = [V2_F, V2_R]
@@ -534,11 +529,11 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
         orbits = []
         for ot in orbit_times:
             orbits.append((t >= ot[0]) & (t < ot[1]))
-        Firstorbit = orbits[1]
-        Otherorbits = np.any(orbits[2:], axis=0)
+        Firstorbit = orbits[k]
+        Otherorbits = np.any(orbits[k+1:], axis=0)
         torb1 = t[Firstorbit] - t[Firstorbit][0]
         torb2 = []
-        for orb in orbits[2:]:
+        for orb in orbits[k+1:]:
             torb2.extend(t[orb] - t[orb][0])
         torb2 = np.array(torb2)
 
@@ -584,13 +579,13 @@ def Func_exp_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, 
 
 def Func_recte_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, V2_R, f0_F, f0_R, E0_s, E0_f, Delta_Es,
               Delta_Ef, SatF, V1_F, V1_R, V3_F, V3_R, Forward, sp_params, orbit_times, satellite_time, Include,
-              exptime, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., fit=True):
+              exptime, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., incl_first_orbit=False, fit=True):
         """
 
         :param t: The observation times of the exposures (BJD)
         :param depth_f: Eclipse depth of forward scanned data
         :param depth_r: Eclipse depth of reverse scanned data
-        :param t0: Mid-transit time (BJD)
+        :param t0: Mid-transit time (days)
         :param inc: orbital inclination
         :param phi: Phase offset of the thermal emission peak in days
         :param V1_F: Sinoid amplitude in forward scanned data
@@ -625,19 +620,8 @@ def Func_recte_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F
             sp_params.limb_dark = "quadratic"  # limb darkening model #don't care
             sp_params.u = [u1, u2]  # stellar limb darkening coefficients
         # Adjust the time of secondary eclipse to the new time offset
-        sp_params.t_secondary = sp_params.t0 + t0 + sp_params.per / 2. * \
-                                (1 + 4 * sp_params.ecc * np.cos(sp_params.w * np.pi / 180.))
-        #Define the times when eclipse starts and ends
-        t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = calc_eclipse_times(sp_params)
-        t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)
-        t_ing_ = (t - t_ing_s) / (t_ecl_s - t_ing_s)
-        eclipse_ = (t > t_ecl_s) & (t < t_ecl_e)
-
-        #Make boolean masks for first part and second part of egress and first and second part of ingress.
-        egress1_ = (t_egr_ > 0) & (t_egr_ < 0.5)
-        egress2_ = (t_egr_ >= 0.5) & (t_egr_ < 1.)
-        ingress1_ = (t_ing_ > 0) & (t_ing_ < 0.5)
-        ingress2_ = (t_ing_ >= 0.5) & (t_ing_ < 1.)
+        m = batman.TransitModel(sp_params, t + t0)
+        sp_params.t_secondary = m.get_t_secondary(sp_params)
 
 
         psi_s = np.zeros_like(t)
@@ -646,16 +630,20 @@ def Func_recte_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F
 
         for depth, V1, V2, V3, f0, Direction in zip(depth_, V1_, V2_, V3_, f0_, Direction_):
             #Forward or reverse
-            t_egr = t_egr_ * Direction
-            t_ing = t_ing_ * Direction
-            eclipse = eclipse_ * Direction
-            egress1 = egress1_ * Direction
-            egress2 = egress2_ * Direction
-            ingress1 = ingress1_ * Direction
-            ingress2 = ingress2_ * Direction
+            t_secondary = sp_params.t_secondary.copy() + t0
+            #print sp_params.t_secondary, t0
+            if not t[0] < t_secondary < t[-1]:
+                if t[0] < t_secondary + sp_params.per < t[-1]:
+                    t_secondary += sp_params.per
+                elif t[0] < t_secondary + 2 * sp_params.per < t[-1]:
+                    t_secondary += 2 * sp_params.per
+                elif t[0] < t_secondary - sp_params.per < t[-1]:
+                    t_secondary -= sp_params.per
+                elif t[0] < t_secondary - 2 * sp_params.per < t[-1]:
+                    t_secondary -= 2 * sp_params.per
+            #print V1, V1 * (24e-6) * (t[0] - t_secondary), t_secondary
 
-            psi_p = Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1, egress2,
-                                     phi, depth, V1, sp_params)
+            psi_p = Planetary_signal(t, phi, depth, V1, t0, sp_params, fit=fit)
             psi_s = Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params)
             S = 1 + V2 * (t - t[0]) + V3 * (t - t[0])**2.  #Systematics
             baseline_w_eclipse[Direction] = f0 * S[Direction] * (psi_s[Direction] + psi_p[Direction])
@@ -678,20 +666,19 @@ def Func_recte_eclipse(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F
             else:
                 depth = depth_r
                 V1 = V1_R
-            entire_phase = 1 + Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr_, t_ing_, eclipse_, ingress1_, ingress2_,
-                                                egress1_, egress2_, phi, depth, V1, sp_params)
+            entire_phase = 1 + Planetary_signal(t, phi, depth, V1, t0, sp_params)
             return np.real(f_m / exptime), np.real(psi_s), np.real(baseline_w_eclipse), np.real(entire_phase)
 
 
 def Func_recte_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F, V2_R, f0_F, f0_R, E0_s, E0_f, Delta_Es,
               Delta_Ef, SatF, V1_F, V1_R, V3_F, V3_R, Forward, sp_params, orbit_times, satellite_time, Include,
-              exptime, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., fit=True):
+              exptime, noexcl, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., incl_first_orbit=False, fit=True):
         """
 
         :param t: The observation times of the exposures (BJD)
         :param depth_f: Eclipse depth of forward scanned data
         :param depth_r: Eclipse depth of reverse scanned data
-        :param t0: Mid-transit time (BJD)
+        :param t0: Mid-transit time offset (days)
         :param inc: orbital inclination
         :param phi: Phase offset of the thermal emission peak in days
         :param V1_F: Sinoid amplitude in forward scanned data
@@ -726,19 +713,6 @@ def Func_recte_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F
             sp_params.limb_dark = "quadratic"  # limb darkening model #don't care
             sp_params.u = [u1, u2]  # stellar limb darkening coefficients
         # Adjust the time of secondary eclipse to the new time offset
-        sp_params.t_secondary = sp_params.t0 + t0 + sp_params.per / 2. * \
-                                (1 + 4 * sp_params.ecc * np.cos(sp_params.w * np.pi / 180.))
-        #Define the times when eclipse starts and ends
-        t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = calc_eclipse_times(sp_params)
-        t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)
-        t_ing_ = (t - t_ing_s) / (t_ecl_s - t_ing_s)
-        eclipse_ = (t > t_ecl_s) & (t < t_ecl_e)
-
-        #Make boolean masks for first part and second part of egress and first and second part of ingress.
-        egress1_ = (t_egr_ > 0) & (t_egr_ < 0.5)
-        egress2_ = (t_egr_ >= 0.5) & (t_egr_ < 1.)
-        ingress1_ = (t_ing_ > 0) & (t_ing_ < 0.5)
-        ingress2_ = (t_ing_ >= 0.5) & (t_ing_ < 1.)
 
 
         psi_s = np.zeros_like(t)
@@ -818,46 +792,68 @@ def Planetary_phase_signal(Times, phi, depth, V1, sp_params, fit=True):
     return V1 * sine + depth - V1
 
 
-def Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1, egress2, phi, depth, V1,
-                     sp_params, fit=True):
+def Planetary_signal(t, phi, depth, V1, t0, sp_params, calc_time_delay=True, fit=True):
     """
     Calculate the planetary flux as a function of time t
 
     :param t: (numpy 1D array) with the times of the exposures
-    :param t_ecl_e: (float) time of end of eclipse (and start of egress) (BJD)
-    :param t_ecl_s: (float) time of start of eclipse (and end of ingress) (BJD)
-    :param t_egr: (numpy 1D array) with the times of egress
-    :param t_ing: (numpy 1D array) with the times of ingress
-    :param eclipse: (numpy 1D boolarray) with True/False whether time t[i] belongs to eclipse (excluding ingress/egress)
-    :param ingress1: (numpy 1D boolarray) with True/False whether time t[i] belongs to first half of ingress
-    :param ingress2: (numpy 1D boolarray) with True/False whether time t[i] belongs to second half of ingress
-    :param egress1: (numpy 1D boolarray) with True/False whether time t[i] belongs to first half of egress
-    :param egress2: (numpy 1D boolarray) with True/False whether time t[i] belongs to second half of egress
     :param phi: (float) phase offset in BJD
     :param depth: (float) eclipse depth
     :param V1: (float) sine amplitude (Flux_day - Flux_night)
+    :param t0: (float) Mid-transit time offset (min)
     :param sp_params: (object) An instance of the spiderman ModelParams function
+    :param calc_time_delay: (bool) Whether to include the effect of time dilation from the distance star-planet
     :param fit: (bool) Whether this is used in a fit (deprecated)
 
     :return: (numpy 1D array) of length t with the planetary flux
     """
-    d1 = Planetary_phase_signal(t_ecl_e, phi, depth, V1, sp_params, fit=fit)
-    d2 = Planetary_phase_signal(t_ecl_s, phi, depth, V1, sp_params, fit=fit)
-    r1 = np.sqrt(d1 / np.pi)
-    r2 = np.sqrt(d2 / np.pi)
-    A_egr_1 = area_of_circular_segment((1. - 2 * t_egr[egress1]) * r1, r1)
-    A_egr_2 = d1 - area_of_circular_segment((-1. + 2 * t_egr[egress2]) * r1, r1)
-    A_ing_1 = area_of_circular_segment((1. - 2 * t_ing[ingress1]) * r2, r2)
-    A_ing_2 = d2 - area_of_circular_segment((-1. + 2 * t_ing[ingress2]) * r2, r2)
 
-    psi_p = Planetary_phase_signal(t, phi, depth, V1, sp_params)
-    psi_p[eclipse] = 0
-    psi_p[egress1] -= d1 - A_egr_1
-    psi_p[egress2] -= d1 - A_egr_2
-    psi_p[ingress1] -= A_ing_1
-    psi_p[ingress2] -= A_ing_2
+    This_phase = (t > sp_params.t_secondary + t0 - 0.5 * sp_params.per) & (t < sp_params.t_secondary + t0 + 0.5 * sp_params.per)
 
-    return psi_p
+    psi_p = np.zeros_like(t)
+    if calc_time_delay:
+        m_temp = batman.TransitModel(sp_params, t + t0, transittype='secondary')
+        time_delay = calc_lighttime_delay_at_time(sp_params, m_temp, sp_params.t0 - t0)
+    else:
+        time_delay = 0.
+
+    sp_params.fp = depth
+    m = batman.TransitModel(sp_params, t + t0 - time_delay, transittype='secondary')
+    lc = m.light_curve(sp_params)
+
+    psi_p = lc - 1
+
+    return psi_p - depth
+
+def calc_lighttime_delay_at_time(sp_params, m, t_trans):
+    """
+    Calculate the time dilation between the planet at its transit position and the position at t_a_peri, a time after
+     periastron.
+
+    :return: (numpy 1D array) of length t with the planetary flux
+    :param sp_params: (object) spiderman/batman parameters object
+    :param m: (object) Batman TransitModel object for a transit/eclipse model without
+    :param t_trans: (float) The time of mid-transit for this planet.
+    :return: (numpy 1D array) time delay in days
+    """
+    true_anomaly = m.get_true_anomaly()
+
+    mtemp = batman.TransitModel(sp_params, np.array([t_trans]))
+    true_anomaly_transit = mtemp.get_true_anomaly()[0]
+
+    if sp_params.ecc > 0.:
+        d_planet_time = (sp_params.a * sp_params.r_s * cs.R_sun.value * (1 - sp_params.ecc**2.)
+                         / (1 + sp_params.ecc * np.cos(true_anomaly)))
+        d_planet_transit = (sp_params.a * sp_params.r_s * cs.R_sun.value * (1 - sp_params.ecc**2.)
+                            / (1 + sp_params.ecc * np.cos(true_anomaly_transit)))
+    else:
+        d_planet_time = sp_params.a * sp_params.r_s * cs.R_sun.value
+        d_planet_transit = sp_params.a * sp_params.r_s * cs.R_sun.value
+
+    Angle = true_anomaly - true_anomaly_transit  #angle between transit-line-of-sight and position at time Times
+
+    return (d_planet_time * -np.cos(Angle) + d_planet_transit) / cs.c.value / 24. / 60. / 60.
+
 
 
 def Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params):
@@ -879,7 +875,7 @@ def Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params):
         if not np.all([hasattr(sp_params, 'pulse_alpha'), hasattr(sp_params, 'pulse_beta'),
                        hasattr(sp_params, 'pulse_Pi')]):
             print "The planet instance does not have the right parameters for stellar pulsations."
-            print "Check the KELT-9b example"
+            print "Check the KELT-9b example in reduction.py"
         alpha = Stel_puls_amp * sp_params.pulse_alpha
         beta = Stel_puls_amp * sp_params.pulse_beta
         Pi = sp_params.pulse_Pi
@@ -890,7 +886,7 @@ def Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0, sp_params):
         if not np.all([hasattr(sp_params, 'harm_A1'), hasattr(sp_params, 'harm_A2'), hasattr(sp_params, 'harm_B2'),
                        hasattr(sp_params, 'harm_A3'), hasattr(sp_params, 'harm_B3')]):
             print "The planet instance does not have the right parameters for harmonics."
-            print "Check the KELT-9b example"
+            print "Check the KELT-9b example in reduction.py"
             A1 = sp_params.harm_A1
             A2 = sp_params.harm_A2
             B2 = sp_params.harm_B2
@@ -1324,303 +1320,7 @@ class Planet:
         self.sp_params.p_u1 = 0  # Planetary limb darkening parameter
         self.sp_params.p_u2 = 0  # Planetary limb darkening parameter
 
-        self.sp_params.xi = 0.3  # Ratio of radiative to advective timescale
-        self.sp_params.T_n = 2556.  # Temperature of nightside      https://arxiv.org/pdf/1910.01567.pdf
-        self.sp_params.delta_T = 2010.  # Day-night temperature contrast
-        self.sp_params.T_s = 9600.  # Temperature of the star
 
-    def calc_eclipse_times(self):
-        #https://pdfs.semanticscholar.org/4572/1b4859970b57496d036396c1b4abe889d4d7.pdf
-        b = ( self.sp_params.a * np.cos(self.sp_params.inc * np.pi / 180.) * (1 - self.sp_params.ecc **2.) /
-              (1 - self.sp_params.ecc * np.sin(self.sp_params.w * np.pi / 180.)) )
-        DT_eclipse_tot  = self.sp_params.per / np.pi * np.arcsin( np.sqrt( (1 + self.sp_params.rp)**2. - b**2.) /
-                                                                  (np.sin(self.sp_params.inc * np.pi / 180. ) *
-                                                                   self.sp_params.a) )
-        DT_eclispe_full = self.sp_params.per / np.pi * np.arcsin( np.sqrt( (1 - self.sp_params.rp)**2. - b**2.) /
-                                                                  (np.sin(self.sp_params.inc * np.pi / 180. ) *
-                                                                   self.sp_params.a) )
-        t_ecl_e = self.sp_params.t_secondary + 0.5 * DT_eclispe_full
-        t_ecl_s = self.sp_params.t_secondary - 0.5 * DT_eclispe_full
-        t_egr_e = self.sp_params.t_secondary + 0.5 * DT_eclipse_tot
-        t_ing_s = self.sp_params.t_secondary - 0.5 * DT_eclipse_tot
-        return t_ecl_e, t_ecl_s, t_egr_e, t_ing_s
-
-    def area_of_circular_segment(self, d, r):
-        return r * (r * np.arccos(d / r) - d * np.sqrt(1 - d**2. / r**2.))
-
-
-
-    def Planetary_phase_signal(self, Times, phi, depth, V1, fit=True):
-        sina = 2 * np.pi * (1. / self.sp_params.per)
-        sine = np.sin(sina * Times + phi - sina * self.sp_params.t_secondary + 0.5 * np.pi)
-        if not fit:
-            print V1, sine, depth, V1
-        return V1 * sine + depth - V1
-
-    def Planetary_signal(self, t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1, egress2, phi, depth, V1, fit=True):
-        d1 = self.Planetary_phase_signal(t_ecl_e, phi, depth, V1, fit)
-        d2 = self.Planetary_phase_signal(t_ecl_s, phi, depth, V1, fit)
-        r1 = np.sqrt(d1 / np.pi)
-        r2 = np.sqrt(d2 / np.pi)
-        A_egr_1 = self.area_of_circular_segment((1. - 2 * t_egr[egress1]) * r1, r1)
-        A_egr_2 = d1 - self.area_of_circular_segment((-1. + 2 * t_egr[egress2]) * r1, r1)
-        A_ing_1 = self.area_of_circular_segment((1. - 2 * t_ing[ingress1]) * r2, r2)
-        A_ing_2 = d2 - self.area_of_circular_segment((-1. + 2 * t_ing[ingress2]) * r2, r2)
-
-        psi_p = self.Planetary_phase_signal(t, phi, depth, V1)
-        psi_p[eclipse] = 0
-        psi_p[egress1] -= d1 - A_egr_1
-        psi_p[egress2] -= d1 - A_egr_2
-        psi_p[ingress1] -= A_ing_1
-        psi_p[ingress2] -= A_ing_2
-
-        return psi_p
-
-    def Stellar_signal(self, t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0):
-        alpha = Stel_puls_amp * 31.9
-        beta = Stel_puls_amp * -109.5
-        Pi = 7.58695 / 24.
-        ksi = (t - self.sp_params.t_secondary - Stel_puls_phase / (2 * np.pi)) / Pi
-
-        A1 = 21.0
-        A2 = -35.7
-        B2 = 16.1
-        A3 = 13.9
-        B3 = -3.
-
-        Phi = (t - self.sp_params.t0 + t0) / self.sp_params.per
-
-        psi_s_1 = A1 * np.sin(2 * np.pi * Phi)
-        psi_s_2 = B2 * np.cos(2 * np.pi * 2 * Phi) + A2 * np.sin(2 * np.pi * 2 * Phi)
-        psi_s_3 = B3 * np.cos(2 * np.pi * 3 * Phi) + A3 * np.sin(2 * np.pi * 3 * Phi)
-
-        Theta = (1.e6 + alpha * np.sin(2 * np.pi * ksi) + beta * np.cos(2 * np.pi * ksi)) / 1.e6
-        Harmonics = (1.e6 + Harm_amp * (psi_s_1 + psi_s_2 + psi_s_3)) / 1.e6
-        return Theta * Harmonics
-
-
-
-
-    def Func_exp_eclipse(self, t, depth_f, depth_r, t0, inc, phi, V2_F, V2_R, f0_F, f0_R, Rorb1_F, Rorb1_R, Rorb2_F, Rorb2_R,
-                   tau_F, tau_R, SatF, V1_F, V1_R, V3_F, V3_R, Stel_puls_phase=0., Stel_puls_amp=0., Harm_amp=0., fit=True):
-        """
-
-        :param t: The observation times of the exposures (BJD)
-        :param depth_f: Eclipse depth of forward scanned data
-        :param depth_r: Eclipse depth of reverse scanned data
-        :param t0: Mid-transit time (BJD)
-        :param inc: orbital inclination
-        :param phi: Phase offset of the thermal emission peak in days
-        :param V1_F: Sinoid amplitude in forward scanned data
-        :param V1_R: Sinoid amplitude in reverse scanned data
-        :param V2_F: HST systematics linear ramp for forward scanned data
-        :param V2_R: HST systematics linear ramp for reverse scanned data
-        :param f0_F: Stellar flux in forward scan
-        :param f0_R: Stellar flux in reverse scan
-        :param E0_s: Trapped slow electrons before observations
-        :param E0_f: Trapped fast electrons before observations
-        :param Delta_Es: Change in slow trapped electrons between orbits
-        :param Delta_Ef: Change in fast trapped electrons between orbits
-        :param SatF: Flux induced by the satellite crossing
-        :param fit: Whether the call to this function is used to fit the data.
-        :return:
-        """
-
-        #print "depth", depth_f, depth_r
-        #print "t0, inc, phi", t0, inc, phi
-        #print "V2, f0", V2_F, V2_R, f0_F, f0_R
-        #print "Rorb1, Rorb2", Rorb1_F, Rorb1_R, Rorb2_F, Rorb2_R
-        #print "tau, Satf", tau_F, tau_R, SatF
-        #print "V1, V3", V1_F, V1_R, V3_F, V3_R
-        #print "Stel_puls", Stel_puls_phase, Stel_puls_amp
-        #print "Harm amp", Harm_amp
-
-        #depth_ = [depth_f,depth_r]
-        depth_ = [depth_f, depth_r]
-        #V1_F, V1_R = 0.5 * depth_f - 0.5*delta1_F, 0.5*depth_r - 0.5 * delta1_R
-        V1_ = [V1_F, V1_R]
-        V2_ = [V2_F, V2_R]
-        V3_ = [V3_F, V3_R]
-        f0_ = [f0_F, f0_R]
-        Rorb1_ = [Rorb1_F, Rorb1_R]
-        Rorb2_ = [Rorb2_F, Rorb2_R]
-        tau_ = [tau_F, tau_R]
-        Direction_ = [self.Forward, ~self.Forward]
-        t = np.array(t)
-
-        if self.t0_not_yet_set:
-            self.sp_params.inc = inc
-        self.sp_params.t_secondary = self.sp_params.t0 + t0 + self.sp_params.per / 2. * \
-                                     (1 + 4 * self.sp_params.ecc * np.cos(self.sp_params.w * np.pi / 180.))
-        t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = self.calc_eclipse_times()
-        t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)
-        t_ing_ = (t - t_ing_s) / (t_ecl_s - t_ing_s)
-        eclipse_ = (t > t_ecl_s) & (t < t_ecl_e)
-        egress1_ = (t_egr_ > 0) & (t_egr_ < 0.5)
-        egress2_ = (t_egr_ >= 0.5) & (t_egr_ < 1.)
-        ingress1_ = (t_ing_ > 0) & (t_ing_ < 0.5)
-        ingress2_ = (t_ing_ >= 0.5) & (t_ing_ < 1.)
-
-        orbits = []
-        for ot in self.orbit_times:
-            orbits.append((t >= ot[0]) & (t < ot[1]))
-        Firstorbit = orbits[1]
-        Otherorbits = np.any(orbits[2:], axis=0)
-        torb1 = t[Firstorbit] - t[Firstorbit][0]
-        torb2 = []
-        for orb in orbits[2:]:
-            torb2.extend(t[orb] - t[orb][0])
-        torb2 = np.array(torb2)
-
-        psi_s = np.zeros_like(t)
-        S = np.zeros_like(t)
-        f_m = np.zeros_like(t, dtype='complex128')
-        baseline_w_eclipse = np.zeros_like(t)
-
-
-
-        for depth, V1, V2, V3, f0, Rorb1, Rorb2, tau, Direction in zip(depth_, V1_, V2_, V3_, f0_, Rorb1_, Rorb2_, tau_, Direction_):
-            #Forward or reverse
-            t_egr = t_egr_ * Direction
-            t_ing = t_ing_ * Direction
-            eclipse = eclipse_ * Direction
-            egress1 = egress1_ * Direction
-            egress2 = egress2_ * Direction
-            ingress1 = ingress1_ * Direction
-            ingress2 = ingress2_ * Direction
-
-            psi_p = self.Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1,
-                                          egress2, phi, depth, V1)
-            #psi_s = Theta / 1.e6
-            psi_s = self.Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0)
-            S[Firstorbit] = ((1 + V2 * (t[Firstorbit] - t[0]) + V3 * (t[Firstorbit] - t[0])**2.) *
-                             (1 - Rorb1 * np.exp(-torb1 / tau))) #Systematics
-            S[Otherorbits] = ((1 + V2 * (t[Otherorbits] - t[0]) + V3 * (t[Otherorbits] - t[0])**2.) *
-                              (1 - Rorb2 * np.exp(-torb2 / tau))) #Systematics
-
-            f_m[Direction] = f0 * S[Direction] * (psi_s[Direction] + psi_p[Direction])
-            baseline_w_eclipse[Direction] = ((1 + V2 * (t[Direction] - t[0]) + V3 * (t[Direction] - t[0])**2.) *
-                                             (psi_s[Direction] + psi_p[Direction]))
-
-            satellite = t == self.satellite_time
-            f_m[satellite] += SatF
-
-        if fit:
-            if self.t0_not_yet_set:
-                return np.real(f_m)
-            else:
-                return np.real(f_m[self.exc_egress])
-        else:
-            if np.sum(self.Forward) != 0.:
-                depth = depth_f
-                V1 = V1_F
-            else:
-                depth = depth_r
-                V1 = V1_R
-            entire_phase = 1 + self.Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr_, t_ing_, eclipse_, ingress1_, ingress2_, egress1_, egress2_, phi, depth, V1)
-            return np.real(f_m), np.real(psi_s), np.real(baseline_w_eclipse), np.real(entire_phase)
-
-    def Fit_recte_WL_t0_i_noFirst(self, t, depth_f, depth_r, t0, inc, phi, V2_F, V2_R, f0_F, f0_R, E0_s, E0_f, Delta_Es,
-                                  Delta_Ef, SatF, V1_F, V1_R, V3_F, V3_R, Stel_puls_phase=0., Stel_puls_amp=0.,
-                                  Harm_amp=0., fit=True):
-        """
-
-        :param t: The observation times of the exposures (BJD)
-        :param depth_f: Eclipse depth of forward scanned data
-        :param depth_r: Eclipse depth of reverse scanned data
-        :param t0: Mid-transit time (BJD)
-        :param inc: orbital inclination
-        :param phi: Phase offset of the thermal emission peak in days
-        :param V1_F: Sinoid amplitude in forward scanned data
-        :param V1_R: Sinoid amplitude in reverse scanned data
-        :param V2_F: HST systematics linear ramp for forward scanned data
-        :param V2_R: HST systematics linear ramp for reverse scanned data
-        :param f0_F: Stellar flux in forward scan
-        :param f0_R: Stellar flux in reverse scan
-        :param E0_s: Trapped slow electrons before observations
-        :param E0_f: Trapped fast electrons before observations
-        :param Delta_Es: Change in slow trapped electrons between orbits
-        :param Delta_Ef: Change in fast trapped electrons between orbits
-        :param SatF: Flux induced by the satellite crossing
-        :param fit: Whether the call to this function is used to fit the data.
-        :return:
-        """
-        #print "depth", depth_f, depth_r
-        #print "t0, inc, phase", t0, inc, phi
-        #print "V2, f0", V2_F, V2_R, f0_F, f0_R
-        #print "E0, Delta_E", E0_s, E0_f, Delta_Es, Delta_Ef
-        #print "SatF, V1, V3", SatF, V1_F, V1_R, V3_F, V3_R
-        #print "Stelpuls", Stel_puls_phase, Stel_puls_amp
-        #print "Harm amp", Harm_amp
-
-
-        #depth_ = [depth_f,depth_r]
-        depth_ = [depth_f, depth_r * f0_R / f0_F]
-        V1_ = [V1_F, V1_R]
-        V2_ = [V2_F, V2_R]
-        V3_ = [V3_F, V3_R]
-        #f0_ = [f0_F, f0_R]
-        f0_ = [f0_F, f0_F]
-        Direction_ = [self.Forward, ~self.Forward]
-        t = np.array(t)
-
-        if self.t0_not_yet_set:
-            self.sp_params.inc = inc
-        self.sp_params.t_secondary = self.sp_params.t0 + t0 + self.sp_params.per / 2. * \
-                                     (1 + 4 * self.sp_params.ecc * np.cos(self.sp_params.w * np.pi / 180.))
-        t_ecl_e, t_ecl_s, t_egr_e, t_ing_s = self.calc_eclipse_times()
-        t_egr_ = (t - t_ecl_e) / (t_egr_e - t_ecl_e)
-        t_ing_ = (t - t_ing_s) / (t_ecl_s - t_ing_s)
-        eclipse_ = (t > t_ecl_s) & (t < t_ecl_e)
-        egress1_ = (t_egr_ > 0) & (t_egr_ < 0.5)
-        egress2_ = (t_egr_ >= 0.5) & (t_egr_ < 1.)
-        ingress1_ = (t_ing_ > 0) & (t_ing_ < 0.5)
-        ingress2_ = (t_ing_ >= 0.5) & (t_ing_ < 1.)
-
-        #orbits = []
-        #for ot in self.orbit_times:
-        #    orbits.append((t >= ot[0]) & (t < ot[1]))
-
-        psi_s = np.zeros_like(t)
-        baseline_w_eclipse = np.zeros_like(t, dtype='complex128')
-
-
-        for depth, V1, V2, V3, f0, Direction in zip(depth_, V1_, V2_, V3_, f0_, Direction_):
-            #Forward or reverse
-            t_egr = t_egr_ * Direction
-            t_ing = t_ing_ * Direction
-            eclipse = eclipse_ * Direction
-            egress1 = egress1_ * Direction
-            egress2 = egress2_ * Direction
-            ingress1 = ingress1_ * Direction
-            ingress2 = ingress2_ * Direction
-
-            psi_p = self.Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr, t_ing, eclipse, ingress1, ingress2, egress1, egress2, phi, depth, V1)
-            #psi_s = Theta / 1.e6
-            psi_s = self.Stellar_signal(t, Stel_puls_amp, Stel_puls_phase, Harm_amp, t0)
-            S = 1 + V2 * (t - t[0]) + V3 * (t - t[0])**2.  #Systematics
-            baseline_w_eclipse[Direction] = f0 * S[Direction] * (psi_s[Direction] + psi_p[Direction])
-
-            satellite = t == self.satellite_time
-            baseline_w_eclipse[satellite] += SatF
-
-        f_m = RECTE.RECTE(baseline_w_eclipse, (t - t[0]) * u.d.to(u.s), exptime = self.exptime,
-                          trap_pop_s=E0_s, trap_pop_f=E0_f, dTrap_s=Delta_Es, dTrap_f=Delta_Ef)
-        f_m[~self.Forward] = f_m[~self.Forward] * f0_R / f0_F
-        if fit:
-            if self.t0_not_yet_set:
-                return f_m / self.exptime
-            else:
-                return f_m[self.exc_egress] / self.exptime
-        else:
-            if np.sum(self.Forward) != 0.:
-                depth = depth_f
-                V1 = V1_F
-            else:
-                depth = depth_r
-                V1 = V1_R
-            entire_phase = 1 + self.Planetary_signal(t, t_ecl_e, t_ecl_s, t_egr_, t_ing_, eclipse_, ingress1_, ingress2_, egress1_, egress2_, phi, depth, V1)
-            return np.real(f_m / self.exptime), np.real(psi_s), np.real(baseline_w_eclipse), np.real(entire_phase)
 
 
     def MCMC_exponential(self, Times, data, errors, orbit_times, Forward, exptime=90, t0=0., deltat=0., a=10.,
@@ -1825,7 +1525,7 @@ class Planet:
                        fix_inclination=True, fix_eccentricity=True, fix_aRs=True, disable_first_ramp=False,
                        disable_second_ramp=False, polynomial=False, same_Rorb=True, nosat=False, Transit=False,
                        exc_indices=[],
-                       fitting_method='least_squares'):
+                       fitting_method='least_squares', incl_first_orbit=False):
         """
         Fit a lightcurve with an exponential systematics fit and a Levenberg-Marquardt-ish algorithm (using package 
          lmfit)
@@ -1883,6 +1583,7 @@ class Planet:
                                of options, see https://lmfit.github.io/lmfit-py/fitting.html#the-minimize-function
                                under method. least_squares is the default because this can (by default) give error-
                                estimates to the fitted parameters.
+        :param incl_first_orbit: (bool) Whether the first orbit of the visit is included in the data. (default=False)
 
         :return:
                  - (list) of optimal parameters. Also includes parameters that were not fit, but were kept fixed
@@ -1896,6 +1597,7 @@ class Planet:
         self.satellite_time = sattime
         self.exptime = exptime
         self.incl_eclipse = True
+        self.incl_first_orbit = incl_first_orbit
 
         #Exclude some data for the fit, but not for plotting
         self.exc_array = np.ones_like(Times, dtype=bool)
@@ -1919,8 +1621,8 @@ class Planet:
 
         if t0 != 0.:  # Set the mid transit time if given.
             self.sp_params.t0 = t0
-            self.sp_params.t_secondary = self.sp_params.t0 + self.sp_params.per / 2. * \
-                                         (1 + 4 / np.pi * self.sp_params.ecc * np.cos(self.sp_params.w * np.pi / 180. ))
+            m = batman.TransitModel(self.sp_params, Times)
+            self.sp_params.t_secondary = m.get_t_secondary(self.sp_params)
         if a != 10.:  #Set a/Rs etc. if given
             self.sp_params.a = a
         if ecc != -1.:
@@ -1960,7 +1662,7 @@ class Planet:
         if deltat !=0:
             fit_params_t0.add('Mid_transit_time_offset', value=deltat, vary=False)
         else:
-            fit_params_t0.add('Mid_transit_time_offset', value=0, max=0.1, min=-0.1)
+            fit_params_t0.add('Mid_transit_time_offset', value=0, max=0.01, min=-0.01)
         if fix_inclination:
             fit_params_t0.add('Inclination', value=i0, vary=False)
         else:
@@ -1979,7 +1681,7 @@ class Planet:
                 print "Only one limb darkening parameter was given, reverting to linear limb darkening"
                 fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
                 fit_params_t0.add('u2', value=0., vary=False)
-                lself.sp_params.limb_dark = 'linear'
+                self.sp_params.limb_dark = 'linear'
             else:
                 fit_params_t0.add('u1', value=self.sp_params.u[0], vary=False)
                 fit_params_t0.add('u2', value=self.sp_params.u[1], vary=False)
@@ -2007,11 +1709,15 @@ class Planet:
             fit_params_t0.add('Stellar_flux_R', expr='Stellar_flux_F')
         else:
             fit_params_t0.add('Stellar_flux_R', value=max_Reverse, max=2. * np.min(data), min=0.5 * np.min(data))
-        fit_params_t0.add('Rorb1_F', value=0.0025, max=0.1, min=0.)
-        if same_Rorb or onlyForward:
-            fit_params_t0.add('Rorb1_R', expr='Rorb1_F')
+        if disable_first_ramp:
+            fit_params_t0.add('Rorb1_F', value=0., vary=False)
+            fit_params_t0.add('Rorb1_R', value=0., vary=False)
         else:
-            fit_params_t0.add('Rorb1_R', value=0.0025, max=0.1, min=0.)
+            fit_params_t0.add('Rorb1_F', value=0.0025, max=0.1, min=0.)
+            if same_Rorb or onlyForward:
+                fit_params_t0.add('Rorb1_R', expr='Rorb1_F')
+            else:
+                fit_params_t0.add('Rorb1_R', value=0.0025, max=0.1, min=0.)
         if disable_second_ramp:
             fit_params_t0.add('Rorb2_F', value=0., vary=False)
             fit_params_t0.add('Rorb2_R', value=0., vary=False)
@@ -2021,11 +1727,15 @@ class Planet:
                 fit_params_t0.add('Rorb2_R', expr='Rorb2_F')
             else:
                 fit_params_t0.add('Rorb2_R', value=0.002, max=0.1, min=0.)
-        fit_params_t0.add('tau_F', value=0.005, max=0.1, min=0.)
-        if same_Rorb or onlyForward:
-            fit_params_t0.add('tau_R', expr='tau_F')
+        if disable_second_ramp and disable_first_ramp:
+            fit_params_t0.add('tau_F', value=0.005, vary=False)
+            fit_params_t0.add('tau_R', value=0.005, vary=False)
         else:
-            fit_params_t0.add('tau_R', value=0.005, max=0.1, min=0.)
+            fit_params_t0.add('tau_F', value=0.005, max=0.1, min=0.)
+            if same_Rorb or onlyForward:
+                fit_params_t0.add('tau_R', expr='tau_F')
+            else:
+                fit_params_t0.add('tau_R', value=0.005, max=0.1, min=0.)
         if nosat:
             fit_params_t0.add('Satellite_flux', value=0., vary=False)
         else:
@@ -2116,7 +1826,7 @@ class Planet:
                        separate_depth=True, fix_pulse_amp=False, puls_amp=1., fix_limb_dark=False, limb_dark='linear',
                        fix_inclination=True, fix_eccentricity=True, fix_aRs=True,
                        polynomial=False, nosat=False, Transit=False, exc_indices=[],
-                       fitting_method='least_squares'):
+                       incl_first_orbit=False, fitting_method='least_squares'):
         """
         Fit a lightcurve with an RECTE charge trap model and a Levenberg-Marquardt-ish algorithm (using package lmfit)
 
@@ -2178,6 +1888,7 @@ class Planet:
         self.satellite_time = sattime
         self.exptime = exptime
         self.incl_eclipse = True
+        self.incl_first_orbit = incl_first_orbit
 
         #Exclude some data for the fit, but not for plotting
         self.exc_array = np.ones_like(Times, dtype=bool)
@@ -2201,8 +1912,8 @@ class Planet:
 
         if t0 != 0.:  # Set the mid transit time if given.
             self.sp_params.t0 = t0
-            self.sp_params.t_secondary = self.sp_params.t0 + self.sp_params.per / 2. * \
-                                         (1 + 4 / np.pi * self.sp_params.ecc * np.cos(self.sp_params.w * np.pi / 180. ))
+            m = batman.TransitModel(self.sp_params, Times)
+            self.sp_params.t_secondary = m.get_t_secondary(self.sp_params)
         if a != 10.:  #Set a/Rs etc. if given
             self.sp_params.a = a
         if ecc != -1.:
@@ -2234,6 +1945,7 @@ class Planet:
 
         fit_params_t0 = Parameters()
         #For every parameter: set vary=True if you want to include this parameter in your fit
+
         if separate_depth and not onlyForward:
             fit_params_t0.add('depth_F', value=0.0016, max=0.1, min=0.0, vary=True)
             fit_params_t0.add('depth_R', value=0.0016, max=0.1, min=0.0, vary=True)
@@ -2243,7 +1955,7 @@ class Planet:
         if deltat !=0:
             fit_params_t0.add('Mid_transit_time_offset', value=deltat, vary=False)
         else:
-            fit_params_t0.add('Mid_transit_time_offset', value=0, max=0.1, min=-0.1)
+            fit_params_t0.add('Mid_transit_time_offset', value=0., max=0.01, min=-0.01)
         if fix_inclination:
             fit_params_t0.add('Inclination', value=i0, vary=False)
         else:
@@ -2331,6 +2043,7 @@ class Planet:
             fit_params_t0.add('Harmonics_amplitude', value=1., min=0., max=3.)
         else:
             fit_params_t0.add('Harmonics_amplitude', value=0., vary=False)
+
 
         def residual(pars, Times, data=None):
             pars['V1_R'].max = 0.5 * pars['depth_R'].value
