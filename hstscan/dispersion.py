@@ -443,15 +443,19 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
     f2 = interp1d(row_sum[Range > maxindex], Range[Range > maxindex])
     print "FWHM of this subexposure is ", f2(0.5* np.max(row_sum)) - f1(0.5* np.max(row_sum))
     args = out[0]
+    arg_errs = np.sqrt(np.diag(out[1]))
     if two_scans:
         scale1, mu1, sig1, scale2, mu2, sig2 = args
         if abs(y0-mu1) < abs(y0-mu2):
             scale, mu, sig = scale1, mu1, abs(sig1)
+            ymid_err = arg_errs[1]
         else:
             scale, mu, sig = scale2, mu2, abs(sig2)
+            ymid_err = arg_errs[4]
         ystart, ymid, yend = int(mu-nsig*sig), mu, int(mu+nsig*sig)     
     else: 
         scale, mu, sig, width = out[0]
+        ymid_err = arg_errs[1]
         sig = abs(sig) # apparently nescessary
         if width <0.: width = 0
         ystart, ymid, yend = int(mu-2*width-nsig*sig), mu, int(mu+2*width+nsig*sig)
@@ -474,4 +478,4 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p.legend()
         p.show()
 
-    return ystart, ymid, yend
+    return ystart, ymid, yend, ymid_err

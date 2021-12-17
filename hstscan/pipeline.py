@@ -493,7 +493,8 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                     shift_in_x, err = r.spec_pix_shift(np.arange(len(ref_tot)), spec, np.arange(len(ref_tot)), ref_tot,
                                                        fitpeak=t.peak)
 
-                    xpix += int(shift_in_x)  # Round off to nearest integer
+                    shift_in_x = -shift_in_x
+                    xpix += 0#int(shift_in_x)  # Round off to nearest integer
                     exposure.Primary.header['XSHIFT'] += shift_in_x
                     exposure.Primary.header['XPIX'] = xpix
                 else:
@@ -538,13 +539,14 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                                          subexp_time, scan_direction, t, tel, logger)
                 subexposure.SCI.header['EXPTIME'] = exposure.Primary.header['EXPTIME'] / len(subexposures)
                 # Fit for y scan height and position given guess
-                ystart, ymid, yend = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig,
+                ystart, ymid, yend, ymid_err = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig,
                                                     two_scans=t.two_scans, debug=True)
 
                 subexposure.xpix = xpix
                 subexposure.ystart = ystart;
                 subexposure.yend = yend;
                 subexposure.ypix = ymid
+                subexposure.ypix_err = ymid_err
 
                 # Calculate wavelength solution
                 if t.tsiaras:
@@ -1065,7 +1067,7 @@ def calc_abs_xshift(direct_image, exposure, subexposure, tel, t, scan_direction,
     else:
         width0 = 40
     image = subexposure.SCI.data.copy()
-    ystart, ymid, yend = disp.get_yscan(image, x0=x_di, y0=y0, width0=width0, nsig=t.nysig,
+    ystart, ymid, yend, ymid_err = disp.get_yscan(image, x0=x_di, y0=y0, width0=width0, nsig=t.nysig,
                                         two_scans=t.two_scans, debug=True)
     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
                                      scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
@@ -1575,6 +1577,9 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         newrefshift = refshift
     exp_spectrum = f.Spectrum(x_ref, y, x_unit='Spectral Pixel', y_unit=unit, refshift=newrefshift,
                                   refshifterr=refshifterr)
+
+    #for i,s in enumerate(spec.x):
+    #    print(i,s)
 
     if t.debug and len(spectra) > 1:
         fig = p.figure(figsize=(10,14))

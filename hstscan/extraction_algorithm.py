@@ -152,7 +152,6 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
             spec.x = spec.x / refstretch - refshift
         else:
             spec.x -= refshift
-    print spec.x[0], specX_orig[0]
 
 
     if t.debug:
@@ -820,8 +819,9 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
 
             f_l, fV_l = optimized_spectrum(D=distn, S=S_l, P=P_l, V=V_l, M=M_l, debug = False)
 
-            showlist = [D.shape[1] / 2, D.shape[1] / 2 + 1]
-            showlist.append(92)
+            #showlist = [D.shape[1] / 2, D.shape[1] / 2 + 1]
+            #showlist.append(92)
+            showlist = [82, 83, 84, 85, 86]
             #showlist.extend([109, 110, 111, 112, 113, 114])
             show_knots=True
             if ((custom_knots is None and debug) or show_knots) and i in showlist:

@@ -989,7 +989,7 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
             Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
         else:
             p0 = [-20., -15.]
-            Bounds = ([-100., -50.], [150., 0.])
+            Bounds = ([-170., -50.], [150., 0.])
             p0_t = [0., -14.5]
             Bounds_t = ([-x_di, -50.], [L - 200. - x_di, 0.])
         Object = spectrum_fit(f_sens, f_stellar, cal_disp_poly_args, tsiaras_args, Peakbool, subexposure)
@@ -1287,12 +1287,14 @@ def custom_transit_params(system='GJ-1214', **kwargs):
     elif system == 'HAT-P-2':
         # Below are rough paramaters for HAT-P-2 b system from https://arxiv.org/pdf/1702.03797.pdf (W)
         # and https://arxiv.org/pdf/0908.1705.pdf (P)
+        # and https://www.aanda.org/articles/aa/pdf/2014/10/aa24257-14.pdf (T)
         per = 5.6334675  #(W)
         params.t0 = 2455288.84969  #(W)
         #params.t_secondary = 2455289.93211 - 2455288.84923
         #params.t_periapse = 2455289.4721 - 2455288.84923
         params.per = per  # orbital period
         params.rp = 0.07227  # Rp/Rs (P)
+        params.rp_err = 0.00061 #error in Rp/Rs (P)
         params.a = 8.99628131  #\pm 0.138 semi-major axis (a/Rs), (calculated from W using rho_s and eq 11 in P)
         params.inc = 86.16  # orbital inclination (in degrees) (W)
         params.ecc = 0.51023  #  # eccentricity (W)
@@ -1306,7 +1308,8 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.r_p = 1.157  #R_jup (P)
         params.r_s = 1.64  #R_sun (P)
         params.m_s = 1.36  #M_sun (P)
-        params.T_s = 6290  #K (T_eff) (P)
+        params.T_s = 6414  #K (T_eff) (T)
+        params.T_s_err = 51 #K error in T_eff (T)
         params.pulse_alpha1 = 35.  #(W)
         params.pulse_beta1 = 0.
         params.pulse_Pi1 = per / 79.
@@ -1330,6 +1333,10 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.u = [0.55]  # stellar limb darkening coefficients
         params.fp = 199.5e-6  # secondary eclipse depth, wave/temp dependent
         params.Hmag = 0.
+        params.T_s = 6460
+        params.T_s_err = 140 #59
+        params.r_p = 1.865
+        params.r_s = 1.458
     elif system == 'XO2':
         # https://arxiv.org/pdf/0705.0003.pdf
         per = 2.615857
@@ -1396,6 +1403,10 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.limb_dark = "linear"  # limb darkening model
         params.u = [0.28]  # stellar limb darkening coefficient
         params.Teq = 1449
+        params.T_s = 6092
+        params.T_s_err = 103
+        params.r_s = 1.203
+        params.r_p = 1.38
     elif system == 'KELT-9':
         #### Following Borsa et al. 2019: https://arxiv.org/pdf/1907.10078.pdf
         # G: Following Gaudi et al. 2017: https://arxiv.org/pdf/1706.06723.pdf
@@ -1501,8 +1512,11 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'V1298b':
         #https://arxiv.org/pdf/1610.09533.pdf
-        per = 24.141106
-        params.t0 = 2457067.049293
+        #New ephemerides and radii from https://arxiv.org/pdf/2111.08660.pdf
+        per = 24.1382
+        #per = 24.141106
+        params.t0 = 2454833 + 4648.0913
+        #params.t0 = 2457067.049293
         params.per = per  # orbital period
         params.w = 85.  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "quadratic"  # limb darkening model #don't care
@@ -1512,14 +1526,22 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a_abs = 0.1688  # The absolute value of the semi-major axis [AU]
         params.inc = 89.517  # Inclination
         params.ecc = 0.087  # Eccentricity
-        params.rp = 0.0700  # Best method
+        params.rp = 0.0635  #0.0700  # Best method
+        params.r_p = 0.916
+        params.r_s = 1.305
+        params.m_s = 1.1
+        params.m_p = 0.069219741
+        params.T_s = 4970
         params.a = 30.06  # Updated from Spizter Semi-major axis scaled by stellar radius
         params.Teq = 677
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'V1298c':
         #https://arxiv.org/pdf/1610.09533.pdf
-        per = 8.249141
-        params.t0 = 2457064.281606
+        #New ephemerides and radii from https://arxiv.org/pdf/2111.08660.pdf
+        per = 8.2479
+        #per = 8.249141
+        params.t0 = 2454833 + 4648.1576
+        #params.t0 = 2457064.281606
         params.per = per  # orbital period
         params.w = 92.  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "quadratic"  # limb darkening model #don't care
@@ -1529,14 +1551,17 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a_abs = 0.0825  # The absolute value of the semi-major axis [AU]
         params.inc = 88.49  # Inclination
         params.ecc = 0.  # Eccentricity
-        params.rp = 0.0381  # Best method
+        params.rp = 0.0339  #0.0381  # Best method
         params.a = 13.19  # Most precise Semi-major axis scaled by stellar radius
         params.Teq = 968
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'V1298d':
         #https://arxiv.org/pdf/1610.09533.pdf
-        per = 12.401623
-        params.t0 = 2457072.399035
+        #New ephemerides and radii from https://arxiv.org/pdf/2111.08660.pdf
+        per = 12.4030
+        #per = 12.401623
+        params.t0 = 2454833 + 4645.4113
+        #params.t0 = 2457072.399035
         params.per = per  # orbital period
         params.w = 88.  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "quadratic"  # limb darkening model #don't care
@@ -1546,14 +1571,14 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a_abs = 0.1083  # The absolute value of the semi-major axis [AU]
         params.inc = 89.04  # Inclination
         params.ecc = 0.  # Eccentricity
-        params.rp = 0.0436  # Best method
+        params.rp = 0.0405  #0.0436  # Best method
         params.a = 17.31  # Most precise Semi-major axis scaled by stellar radius
         params.Teq = 845
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
     elif system == 'V1298e':
-        #https://arxiv.org/pdf/1610.09533.pdf
-        per = 60
-        params.t0 = 2457096.6229
+        #https://arxiv.org/pdf/2111.08660.pdf
+        per = 45.869
+        params.t0 = 2454833 + 4648.7975
         params.per = per  # orbital period
         params.w = 91  # longitude of periastron (in degrees) #Don't care, no e
         params.limb_dark = "quadratic"  # limb darkening model #don't care
@@ -1563,7 +1588,7 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.a_abs = 0.308  # The absolute value of the semi-major axis [AU]
         params.inc = 89.4  # Inclination
         params.ecc = 0.  # Eccentricity
-        params.rp = 0.0611  # Best method
+        params.rp = 0.0685  # Best method
         params.a = 51.  # Most precise Semi-major axis scaled by stellar radius
         params.Teq = 492
         params.t_secondary = params.t0 + params.per / 2. * (1 + 4 * params.ecc * np.cos(params.w))
@@ -1645,6 +1670,46 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.pulse_beta2 = 0.
         params.pulse_Pi2 = per / 91.
         params.pulse_phi2 = 0.00882145#-0.013255503458503478
+    elif system == 'WASP-76':
+        # Below are paramaters for WASP-76 system (https://arxiv.org/pdf/2005.02568.pdf)
+        per = 1.80988158
+        params.t0 = 2456107.85494
+        params.t_secondary = params.t0 + per / 2.
+        params.per = per  # orbital period
+        params.rp = 0.10873  # Rp/Rs, mean 0.0142
+        params.rp_err = 0.00048
+        params.a = 4.078  # semi-major axis (a/Rs), mean 2.0
+        params.a_err = 0.072
+        params.inc = 88.5  # orbital inclination (in degrees)
+        params.ecc = 0.016  # eccentricity
+        params.w = 62  # longitude of periastron (in degrees)
+        params.limb_dark = "linear"  # limb darkening model
+        params.u = [0.25]  # stellar limb darkening coefficients
+        params.fp = 2407e-6  # secondary eclipse depth @ 4.5um, wave/temp dependent
+        params.Hmag = 0.
+        params.T_s = 6366
+        params.T_s_err = 91 #59
+        params.r_p = 1.845
+        params.r_s = 1.744
+    elif system == 'Earth':
+        per = 365.24
+        params.t0 = 0.
+        params.per = per  # orbital period
+        params.rp = 0.00917
+        params.a = 215.03
+        params.inc = 90
+        params.ecc = 0.01671
+        params.w = 0
+        params.limb_dark = "quadratic"  # limb darkening model
+        params.u = [0.133, 0.241]  # stellar limb darkening coefficients, calculated with ExoCTK (-), linear: 0.31
+        params.t_secondary = per / 2.
+        params.a_abs = 1
+        params.m_p = 0.00315
+        params.r_p = 0.0892
+        params.r_s = 1.
+        params.m_s = 1.
+        params.T_s = 5780
+        params.T_s_err = 1
 
 
     else:
