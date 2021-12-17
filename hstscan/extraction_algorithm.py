@@ -72,7 +72,7 @@ def optimized_spectrum(D, S, P, V, M, debug=False):
         #print #np.sum(P), f_opt
     return f_opt, fV_opt
 
-def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
+def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[], Stretch=True):
     """
     Shifts a spectrum to the wavelength solution of a reference exposure. The wavelength solution of the input
      exposure is assumed to be almost correct. That is, to *exactly* match the correct wavelength solution only a shift
@@ -89,7 +89,6 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
     :param logger: A logger object
     :return:
     """
-    Stretch = False
 
     if scan_dir_match:
         s = 0
@@ -131,8 +130,12 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
                                                         fitpeak=t.peak)
         pixshift = refshift * len(x) / (max(x) - min(x))
         pixshifterr = referr * len(x) / (max(x) - min(x))
-        logger.info('Applied an xshift of {} pix and stretch of {} percent'.format(pixshift, (1 - refstretch) / 100.) +
+        logger.info('Applied an xshift of {} pix and stretch of {} percent '.format(pixshift, (1 - refstretch) / 100.) +
                     'compared to reference (reduced) spectrum {}'.format(t.ref_exp))
+        #When measuring the xshift of an exposure, we don't take the stretching into account:
+        refshift2, referr2 = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, fitpeak=t.peak)
+        pixshift = refshift2 * len(x) / (max(x) - min(x))
+        pixshifterr = referr2 * len(x) / (max(x) - min(x))
     else:
         refshift, referr = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, fitpeak=t.peak)
         pixshift = refshift * len(x) / (max(x) - min(x))
@@ -146,12 +149,18 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
         logger.warning('The shift in pixels is rather large. The flat-field on this exposure may not have been ' +
                        'working optimally.')
     specX_orig = [spec.x.copy() for spec in spectra]
-    print spec.x[0], specX_orig[0]
     for spec in spectra:
         if Stretch:
-            spec.x = spec.x / refstretch - refshift
+            #spec.x = spec.x / refstretch - refshift
+            #spec.x = spec.x / refstretch - refshift
+            #spec.y = np.interp(x_ref, (spec.x - refshift) / refstretch, spec.y) * refstretch
+            #print spec.x[0]
+            spec.y = np.interp(x_ref, (spec.x - refshift) / refstretch, spec.y) * refstretch
+            #spec.y = np.interp(x_ref, (x_ref - refshift) / refstretch, spec.y) * refstretch
+            #spec.x = x_ref#(spec.x - refshift) / refstretch
         else:
             spec.x -= refshift
+    print spec.x[0], specX_orig[0][0]
 
 
     if t.debug:
@@ -187,7 +196,7 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[]):
             p.show()
 
 
-    return spectra, x_ref, pixshift, pixshifterr
+    return spectra, x_ref, pixshift, pixshifterr, Stretch
 
 def find_stellar_line(x, y, w_ref1=1.1, w_ref2=1.7):
     """
@@ -214,7 +223,7 @@ def find_stellar_line(x, y, w_ref1=1.1, w_ref2=1.7):
             largest_dip_x = index + i
     return largest_dip_x
 
-def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretch=True):
+def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretch=True, Stretched_0=False):
     """
     Match the subexposures to the first/last subexposure depending on scan direction. This is done by shifting the
     subexposures to the wavelength solution of the first subexposure. One can also stretch/shrink them. This is
@@ -244,7 +253,11 @@ def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretc
     interp_spectra = []
     for i,spec in enumerate(spectra):
         if Stretch and i != s:
-            shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
+            if Stretched_0:
+                shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
+                                                   fitpeak=peak)
+            else:
+                shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
                                                    fitpeak=peak)
             #shifted_y = np.interp(x_ref, spec.x / stretch - shift, spec.y) * stretch
             shifted_y = np.interp(x_ref, (spec.x - shift) / stretch, spec.y) * stretch
@@ -260,8 +273,11 @@ def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretc
             shifted_y = np.interp(x_ref, spec.x - shift, spec.y)
             logger.info("Shifted subexposure nr. {} with ".format(i) +
                         "{} pixels".format(shift * len(x_ref) / (max(x_ref) - min(x_ref))))
+        elif Stretched_0:
+            shifted_y = np.interp(x_ref, spec.x, spec.y)#spec.y
+            shift, err = 0, 0
         else:
-            shift, err = 0,0
+            shift, err = 0, 0
             shifted_y = np.interp(x_ref, spec.x, spec.y)
         interp_spectra.append(shifted_y)
 

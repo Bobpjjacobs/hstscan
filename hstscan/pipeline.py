@@ -555,6 +555,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                                                                      TRACE_COEFFS=TRACE_COEFFS, wdpt_grid_y=t.grid_y,
                                                                      wdpt_grid_lam=t.grid_lam,
                                                                      WFC_conf_file=conf_file)
+                    subexposure.wave_grid_ff = subexposure.wave_grid.copy()
 
                     # Define wavelength grid to interpolate to: 0.9-1.92, 200
                     wave_ref = np.linspace(t.ref_wv0, t.ref_wv1, 200)  # subexposure.wave_grid[0]
@@ -566,8 +567,15 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                                                      scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                                      data_dir=t.source_dir, debug=False, x=subexposure.xpix,
                                                      y=subexposure.ypix, disp_coef=t.disp_coef)
+                    #Calculate a wavelength grid for the flat-fielding that is more precise than the above.
+                    wave_grid_ff, trace_ff = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
+                                                     scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                                     data_dir=t.source_dir, debug=False, x=subexposure.xpix + shift_in_x,
+                                                     y=subexposure.ypix, disp_coef=t.disp_coef)
                     subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
+                    subexposure.wave_grid_ff = wave_grid_ff[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
                     wave_ref = subexposure.wave_grid[0]
+                    print("waveref", wave_ref[0])
 
                 subexposure.waves = wave_ref
                 if step == 'partial':
@@ -580,7 +588,8 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 # Need to do before interpolating to a reference row
                 if t.flat_field and (step == 'final' or t.ref_exp):
                     #nys = subexposure.yend - subexposure.ystart
-                    _waves = subexposure.wave_grid  # subexposure.waves.repeat(nys).reshape(-1, nys).T
+                    _waves = subexposure.wave_grid_ff #Use the flat-field specific wavelength-grid, which is more precise  # subexposure.waves.repeat(nys).reshape(-1, nys).T
+                    print("waveschange", _waves[0,100:104])
                     if subexposure.SCI.data.shape[1] < xpix + 200:
                         x1 = int(xpix) + cut_image.shape[1]
                     else:
@@ -1172,7 +1181,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                'top_half':False, 'k_col':9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                'outliers_to_average':False, 'slopefactor':0.1, 'slope_second_order':False,
                'custom_knots_F':None, 'custom_knots_R':None, 'show_knots':False,
-               'wshift_to_ref':False, 'ref_exp': None, 'write':True, 'remove_subexps_list':[]
+               'wshift_to_ref':False, 't.wstretch_first_sub':True, 'ref_exp': None, 'write':True, 'remove_subexps_list':[]
                }
     if conf_file:
         conf_kwargs = data.read_conf_file(conf_file)
@@ -1493,9 +1502,12 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
     # to account for telescope drifts during an orbit/visit
     if t.wshift_to_ref and t.ref_exp != reduced_exposure.rootname:
         if t.pdf:
-            spectra, x_ref, refshift, refshifterr = ea.shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=pdf)
+            spectra, x_ref, refshift, refshifterr, Stretched_0 = ea.shift_to_ref(spectra, x, y, t, scan_dir_match,
+                                                                                 logger, pdf=pdf,
+                                                                                 Stretch=t.wstretch_first_sub)
         else:
-            spectra, x_ref, refshift, refshifterr = ea.shift_to_ref(spectra, x, y, t, scan_dir_match, logger)
+            spectra, x_ref, refshift, refshifterr, Stretched_0 = ea.shift_to_ref(spectra, x, y, t, scan_dir_match,
+                                                                                 logger, Stretch=t.wstretch_first_sub)
     elif t.ref_exp != reduced_exposure.rootname and t.ref_exp is not None:
         try:
             ref = np.loadtxt(t.save_dir + t.ref_exp + t.save_extension, skiprows=2).T
@@ -1504,7 +1516,9 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                             "from {} or disable the wshift_to_ref toggle".format(t.ref_exp))
         x_ref = ref[0]
         refshift, refshifterr = 0, 0
+        Stretched_0 = False
     else:
+        Stretched_0 = False
         refshift, refshifterr= 0, 0
         x_ref = x  #The reference wavelength: the wavelength grid on which to save the spectra
 
@@ -1515,7 +1529,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
     #t.no_interp = True
     if t.wshift_sub_exps:
         sub_shifts, interp_spectra = ea.match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=t.peak,
-                                                           Stretch=t.wstretch_sub_exps)
+                                                           Stretch=t.wstretch_sub_exps, Stretched_0=Stretched_0)
     elif t.no_interp:
         # Not interpolating the spectra
         #sub_shifts, interp_spectra = ea.match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=t.peak,
