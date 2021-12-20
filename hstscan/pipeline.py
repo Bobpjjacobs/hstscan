@@ -1181,7 +1181,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                'top_half':False, 'k_col':9, 'k_row':None, 'object_ind':0, 'oe_debug':0, 'oe_pdf':None,
                'outliers_to_average':False, 'slopefactor':0.1, 'slope_second_order':False,
                'custom_knots_F':None, 'custom_knots_R':None, 'show_knots':False,
-               'wshift_to_ref':False, 't.wstretch_first_sub':True, 'ref_exp': None, 'write':True, 'remove_subexps_list':[]
+               'wshift_to_ref':False, 'wstretch_first_sub':True, 'ref_exp': None, 'write':True, 'remove_subexps_list':[]
                }
     if conf_file:
         conf_kwargs = data.read_conf_file(conf_file)

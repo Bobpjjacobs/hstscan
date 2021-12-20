@@ -126,6 +126,7 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[], Stretch=True)
             spec.x = x
             spec.y = y
     if Stretch:
+        print x_ref - spectra[s].x
         refshift, refstretch, referr = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, stretch=True,
                                                         fitpeak=t.peak)
         pixshift = refshift * len(x) / (max(x) - min(x))
@@ -149,37 +150,35 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[], Stretch=True)
         logger.warning('The shift in pixels is rather large. The flat-field on this exposure may not have been ' +
                        'working optimally.')
     specX_orig = [spec.x.copy() for spec in spectra]
-    for spec in spectra:
-        if Stretch:
-            #spec.x = spec.x / refstretch - refshift
-            #spec.x = spec.x / refstretch - refshift
-            #spec.y = np.interp(x_ref, (spec.x - refshift) / refstretch, spec.y) * refstretch
-            #print spec.x[0]
-            spec.y = np.interp(x_ref, (spec.x - refshift) / refstretch, spec.y) * refstretch
-            #spec.y = np.interp(x_ref, (x_ref - refshift) / refstretch, spec.y) * refstretch
-            #spec.x = x_ref#(spec.x - refshift) / refstretch
-        else:
+    if Stretch:
+        spectra[s].y = np.interp(x_ref, (spectra[s].x - refshift) / refstretch, spectra[s].y) * refstretch
+        spectra[s].x = x_ref.copy()
+    else:
+        for spec in spectra:
             spec.x -= refshift
-    print spec.x[0], specX_orig[0][0]
 
 
     if t.debug:
+        spec = spectra[s]
         ref_ampl = np.trapz(y_ref, x=x_ref)
         spec_ampl = np.trapz(y_spec, x=spec.x)
         scale = ref_ampl / spec_ampl
         p.figure(figsize=(10,10))
         p.subplot(2, 1, 1)
-        data.plot_data(x=[x_ref, spec.x], y=[y_ref, y_spec * scale], label=['Reference', 'Shifted'],
+        #data.plot_data(x=[x_ref, spec.x], y=[y_ref, y_spec * scale], label=['Reference', 'Shifted'],
+        #               title='First subexposure shifted to reference', xlabel='Wavelength (micron)',
+        #               ylabel='Counts in reference exposure')
+        data.plot_data(x=[x_ref, spec.x], y=[y_ref, spec.y * scale, ], label=['Reference', 'Shifted'],
                        title='First subexposure shifted to reference', xlabel='Wavelength (micron)',
                        ylabel='Counts in reference exposure')
         p.legend()
 
         p.subplot(2, 1, 2)
         if t.Zoom_wavelength:
-            x_stellar_line = find_stellar_line(x_ref, y_spec, w_ref1=t.Zoom_wavelength - 0.005,
+            x_stellar_line = find_stellar_line(x_ref, spec.y, w_ref1=t.Zoom_wavelength - 0.005,
                                                w_ref2=t.Zoom_wavelength + 0.005)
         else:
-            x_stellar_line = find_stellar_line(x_ref, y_spec, w_ref1 = t.telescope.w_ref1, w_ref2=t.telescope.w_ref2)
+            x_stellar_line = find_stellar_line(x_ref, spec.y, w_ref1 = t.telescope.w_ref1, w_ref2=t.telescope.w_ref2)
         xstart, xend = x_stellar_line - 7, x_stellar_line + 7
         y_interp = np.interp(x_ref, spectra[s].x, spectra[s].y)
         data.plot_data(x=[x_ref[xstart:xend], spectra[s].x[xstart:xend], specX_orig[s][xstart:xend], x_ref[xstart:xend]],
@@ -254,7 +253,7 @@ def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretc
     for i,spec in enumerate(spectra):
         if Stretch and i != s:
             if Stretched_0:
-                shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
+                shift, stretch, err = r.spec_pix_shift(x_ref, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
                                                    fitpeak=peak)
             else:
                 shift, stretch, err = r.spec_pix_shift(ref_spec.x, ref_spec.y, spec.x, spec.y, norm=True, stretch=Stretch,
@@ -274,7 +273,7 @@ def match_subexposures(spectra, x_ref, logger, scan_dir_match, peak=True, Stretc
             logger.info("Shifted subexposure nr. {} with ".format(i) +
                         "{} pixels".format(shift * len(x_ref) / (max(x_ref) - min(x_ref))))
         elif Stretched_0:
-            shifted_y = np.interp(x_ref, spec.x, spec.y)#spec.y
+            shifted_y =  np.interp(x_ref, spec.x, spec.y)#spec.y
             shift, err = 0, 0
         else:
             shift, err = 0, 0
