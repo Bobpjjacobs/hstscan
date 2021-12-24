@@ -1493,7 +1493,7 @@ class Planet:
                     pos.append(self.parameters[name]['value'] + np.random.randn(nwalkers) * self.parameters[name]['walker_sigma'])
                 else:
                     print "Warning: incorrect value entred for 'sigma_type' for parameter ", name
-            else:
+            else:i
                 print "Warning: incorrect value entred for 'walker_locs' for parameter ", name
 
 

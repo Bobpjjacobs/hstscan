@@ -1691,6 +1691,36 @@ def custom_transit_params(system='GJ-1214', **kwargs):
         params.T_s_err = 91 #59
         params.r_p = 1.845
         params.r_s = 1.744
+    elif system == '55Cnce':
+
+        per = 0.737
+        params.t0 = 2449999.83643
+        params.per = per  # orbital period
+        params.rp = 0.0195 # Rp/Rs
+        params.rp_err = 0.0013 #error in Rp/Rs
+        params.a = 1./0.2769  #\pm 0.138 semi-major axis (a/Rs), (calculated from W using rho_s and eq 11 in P)
+        params.inc = 90.  # orbital inclination (in degrees)
+        params.ecc = 0.028  #  # eccentricity
+        params.w = 170  # longitude of periastron (in degrees)
+        params.limb_dark = "quadratic"  # limb darkening model
+        params.u = [0.133, 0.241]
+        params.t_secondary = 55289.4734 - 55288.84988
+        params.Hmag = 4.14  #(-)
+        params.a_abs = 0.015439
+        params.m_p = 0.02703  #M_jup
+        params.r_p = 0.1737  #R_jup
+        params.r_s = 0.98  #R_sun
+        params.m_s = 1.015  #M_sun
+        params.T_s = 5196  #K (T_eff)
+        params.T_s_err = 24 #K error in T_eff
+        params.pulse_alpha1 = 0.
+        params.pulse_beta1 = 0.
+        params.pulse_Pi1 = per / 79.
+        params.pulse_phi1 = 0.
+        params.pulse_alpha2 = 0.
+        params.pulse_beta2 = 0.
+        params.pulse_Pi2 = per / 91.
+        params.pulse_phi2 = 0.
     elif system == 'Earth':
         per = 365.24
         params.t0 = 0.

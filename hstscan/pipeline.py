@@ -563,19 +563,23 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 else:
                     # Regular wavelength correction
                     L = subexposure.SCI.data.shape[0]
+                    print("SHIFTINX", shift_in_x)
                     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
                                                      scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
                                                      data_dir=t.source_dir, debug=False, x=subexposure.xpix,
                                                      y=subexposure.ypix, disp_coef=t.disp_coef)
                     #Calculate a wavelength grid for the flat-fielding that is more precise than the above.
-                    wave_grid_ff, trace_ff = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
-                                                     scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
-                                                     data_dir=t.source_dir, debug=False, x=subexposure.xpix + shift_in_x,
-                                                     y=subexposure.ypix, disp_coef=t.disp_coef)
-                    subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
-                    subexposure.wave_grid_ff = wave_grid_ff[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
+                    if t.ref_exp != exposure.rootname:
+                        wave_grid_ff, trace_ff = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
+                                                               scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,
+                                                               data_dir=t.source_dir, debug=False, x=subexposure.xpix + shift_in_x,
+                                                               y=subexposure.ypix, disp_coef=t.disp_coef)
+                        subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
+                        subexposure.wave_grid_ff = wave_grid_ff[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
+                    else:
+                        subexposure.wave_grid = wave_grid[subexposure.ystart:subexposure.yend, int(xpix):int(xpix) + 200]
+                        subexposure.wave_grid_ff = subexposure.wave_grid.copy()
                     wave_ref = subexposure.wave_grid[0]
-                    print("waveref", wave_ref[0])
 
                 subexposure.waves = wave_ref
                 if step == 'partial':
