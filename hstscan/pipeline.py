@@ -534,6 +534,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 subexp_time = subexposure.SCI.header['SAMPTIME']
 
                 # Guess position of y from DI
+                print(t.yguess_offset_f, scan_direction)
                 y0, width0 = disp.get_y0(subexposure, y_di, [t.yguess_offset_f, t.yguess_offset_r], di_ps2,
                                          exposure.Primary.header['POSTARG2'], i, exposure.Primary.header['EXPTIME'],
                                          subexp_time, scan_direction, t, tel, logger)
@@ -1279,6 +1280,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
                 custom_knots = None
             else:
                 if scan_direction == 1:
+                    print(n_sub, len(t.custom_knots_F))
                     custom_knots = t.custom_knots_F[n_sub]
                 elif scan_direction == -1:
                     custom_knots = t.custom_knots_R[n_sub]
@@ -1656,7 +1658,8 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
         with open(fname, 'w') as txtf:
             # this assumes you did wavelength calibration
             txtf.write('wave\tflux\terror\n')
-            txtf.write('Observation-time: {} \n'.format(reduced_exposure.Primary.header['t']))
+            print("reduced", reduced_exposure.Primary.header['t'])
+            txtf.write('Observation-time: {:.10f} \n'.format(reduced_exposure.Primary.header['t']))
             txtf.write(text)
 
         if t.save_sub:
@@ -1674,7 +1677,7 @@ def extract_spectra(reduced_exposure, conf_file=None, **kwargs):
             with open(fname, 'w') as txtf:
                 # this assumes you did wavelength calibration
                 txtf.write('wave\tflux\terror\tfor each subexposure number\n')
-                txtf.write('Observation-time: {} \n'.format(reduced_exposure.Primary.header['t']))
+                txtf.write('Observation-time: {:.10f} \n'.format(reduced_exposure.Primary.header['t']))
                 for line in lines:
                     txtf.write(line)
 

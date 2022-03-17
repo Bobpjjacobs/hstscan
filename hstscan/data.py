@@ -1223,6 +1223,7 @@ def find_catalogue(rootname, logger, data_dir='/home/jacob/hst_data/'):
                     cat = '_'.join(catalogue_split)
                 logger.warning('Replaced catalogue with {}'.format(cat))
             return cat, cat_rootname
+    print data_dir+'input_image.lis'
     print lines
     assert cat_rootname is not None, "No direct image found for {}".format(rootname)
     return cat, cat_rootname

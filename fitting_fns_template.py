@@ -732,7 +732,6 @@ def Func_recte_transit(t, depth_f, depth_r, t0, inc, ecc, aRs, u1, u2, phi, V2_F
 
             satellite = t == satellite_time
             baseline_w_eclipse[satellite] += SatF
-
         f_m = RECTE.RECTE(baseline_w_eclipse, (t - t[0]) * u.d.to(u.s), exptime = exptime,
                           trap_pop_s=E0_s, trap_pop_f=E0_f, dTrap_s=Delta_Es, dTrap_f=Delta_Ef)
         f_m[~Forward] = f_m[~Forward] * f0_R / f0_F
@@ -1493,7 +1492,7 @@ class Planet:
                     pos.append(self.parameters[name]['value'] + np.random.randn(nwalkers) * self.parameters[name]['walker_sigma'])
                 else:
                     print "Warning: incorrect value entred for 'sigma_type' for parameter ", name
-            else:i
+            else:
                 print "Warning: incorrect value entred for 'walker_locs' for parameter ", name
 
 
