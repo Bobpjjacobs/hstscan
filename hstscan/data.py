@@ -608,6 +608,7 @@ def broadband_fluxes(files=None, system='GJ-1214',source_dir='/home/jacob/hst_da
                 break
             else: 
                 pass
+        #print rootname, fluxes
 
     # Interpolate to first spectrum in the visit/orbit
     template_x, template_y = all_waves[-1], np.median(all_flux, axis=0)

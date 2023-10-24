@@ -529,6 +529,8 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
             # Now compute wavelength solution given direct image position
             tot_image = 0.
             new_subs = []
+
+            exposure.scanlength = 0
             for i, subexposure in enumerate(subexposures):
                 image = subexposure.SCI.data.copy()
                 subexp_time = subexposure.SCI.header['SAMPTIME']
@@ -540,7 +542,7 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                                          subexp_time, scan_direction, t, tel, logger)
                 subexposure.SCI.header['EXPTIME'] = exposure.Primary.header['EXPTIME'] / len(subexposures)
                 # Fit for y scan height and position given guess
-                ystart, ymid, yend, ymid_err = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig,
+                ystart, ymid, yend, ymid_err,fwhm = disp.get_yscan(image, x0=xpix, y0=y0, width0=width0, nsig=t.nysig,
                                                     two_scans=t.two_scans, debug=True)
 
                 subexposure.xpix = xpix
@@ -548,6 +550,8 @@ def reduce_exposure(exposure, conf_file=None, tel=HST(), **kwargs):
                 subexposure.yend = yend;
                 subexposure.ypix = ymid
                 subexposure.ypix_err = ymid_err
+                subexposure.fwhm = fwhm
+                exposure.scanlength += fwhm
 
                 # Calculate wavelength solution
                 if t.tsiaras:
@@ -1081,7 +1085,7 @@ def calc_abs_xshift(direct_image, exposure, subexposure, tel, t, scan_direction,
     else:
         width0 = 40
     image = subexposure.SCI.data.copy()
-    ystart, ymid, yend, ymid_err = disp.get_yscan(image, x0=x_di, y0=y0, width0=width0, nsig=t.nysig,
+    ystart, ymid, yend, ymid_err, fwhm = disp.get_yscan(image, x0=x_di, y0=y0, width0=width0, nsig=t.nysig,
                                         two_scans=t.two_scans, debug=True)
     wave_grid, trace = cal.disp_poly(t.conf_file_g141, catalogue, subexp_time, t.scan_rate,
                                      scan_direction, order=1, x_len=L, y_len=L, XOFF=XOFF, YOFF=YOFF,

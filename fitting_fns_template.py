@@ -1823,7 +1823,7 @@ class Planet:
                        verbose=True, t0=0., deltat=0., a=10., ecc=-1., phi=1000., inc=1000., sattime=1.e6,
                        sine=False, stel_pulse=False, harmonics=False,
                        separate_depth=True, fix_pulse_amp=False, puls_amp=1., fix_limb_dark=False, limb_dark='linear',
-                       fix_inclination=True, fix_eccentricity=True, fix_aRs=True,
+                       fix_inclination=True, fix_eccentricity=True, fix_aRs=True, fix_Rp=False,
                        polynomial=False, nosat=False, Transit=False, exc_indices=[],
                        incl_first_orbit=False, fitting_method='least_squares'):
         """
@@ -1866,6 +1866,7 @@ class Planet:
         :param fix_inclination: (bool) Whether to fix the orbital inclination
         :param fix_eccentricity: (bool) Whether to fix the orbital eccentricity
         :param fix_aRs: (bool) Whether to fix a/Rs
+        :param fix_Rp: (bool) Whether to fix the planetary radius (i.e. transit depth)
         :param polynomial: (bool) Whether to include a polynomial to the HST systematics baseline
         :param nosat: (bool) Whether to ignore any possible satellite crossings
         :param Transit: (bool) Whether to fit a transit or an eclipse.
@@ -1945,12 +1946,16 @@ class Planet:
         fit_params_t0 = Parameters()
         #For every parameter: set vary=True if you want to include this parameter in your fit
 
-        if separate_depth and not onlyForward:
-            fit_params_t0.add('depth_F', value=0.0016, max=0.1, min=0.0, vary=True)
-            fit_params_t0.add('depth_R', value=0.0016, max=0.1, min=0.0, vary=True)
+        if fix_Rp:
+            fit_params_t0.add('depth_F', value=self.sp_params.rp**2., vary=False)
+            fit_params_t0.add('depth_R', value=self.sp_params.rp**2., vary=False)
         else:
-            fit_params_t0.add('depth_F', value=0.0016, max=0.1, min=0.0, vary=True)
-            fit_params_t0.add('depth_R', expr='depth_F')
+            if separate_depth and not onlyForward:
+                fit_params_t0.add('depth_F', value=0.0016, max=0.1, min=0.0, vary=True)
+                fit_params_t0.add('depth_R', value=0.0016, max=0.1, min=0.0, vary=True)
+            else:
+                fit_params_t0.add('depth_F', value=0.0016, max=0.1, min=0.0, vary=True)
+                fit_params_t0.add('depth_R', expr='depth_F')
         if deltat !=0:
             fit_params_t0.add('Mid_transit_time_offset', value=deltat, vary=False)
         else:
@@ -2001,10 +2006,10 @@ class Planet:
             fit_params_t0.add('Stellar_flux_R', expr='Stellar_flux_F')
         else:
             fit_params_t0.add('Stellar_flux_R', value=max_Reverse, max=2. * np.min(data), min=0.5 * np.min(data))
-        fit_params_t0.add('E0_s', value=1000., max=1525.38, min=0.)
-        fit_params_t0.add('E0_f', value=100., max=162.38, min=0.)
-        fit_params_t0.add('Delta_Es', value=100., max=1525.38, min=0.)
-        fit_params_t0.add('Delta_Ef', value=80., max=162.38, min=0.)
+        fit_params_t0.add('E0_s', value=0., max=1525.38, min=0.)
+        fit_params_t0.add('E0_f', value=0., max=162.38, min=0.)
+        fit_params_t0.add('Delta_Es', value=50., max=1525.38, min=0.)
+        fit_params_t0.add('Delta_Ef', value=0., max=162.38, min=0.)
         if nosat:
             fit_params_t0.add('Satellite_flux', value=0., vary=False)
         else:
@@ -2042,6 +2047,7 @@ class Planet:
             fit_params_t0.add('Harmonics_amplitude', value=1., min=0., max=3.)
         else:
             fit_params_t0.add('Harmonics_amplitude', value=0., vary=False)
+
 
 
         def residual(pars, Times, data=None):

@@ -441,7 +441,8 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
     maxindex = np.argwhere(row_sum == np.max(row_sum))[0][0]
     f1 = interp1d(row_sum[Range < maxindex], Range[Range < maxindex])
     f2 = interp1d(row_sum[Range > maxindex], Range[Range > maxindex])
-    print "FWHM of this subexposure is ", f2(0.5* np.max(row_sum)) - f1(0.5* np.max(row_sum))
+    fwhm = f2(0.5* np.max(row_sum)) - f1(0.5* np.max(row_sum))
+    print "FWHM of this subexposure is ", fwhm
     args = out[0]
     arg_errs = np.sqrt(np.diag(out[1]))
     if two_scans:
@@ -478,4 +479,4 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
         p.legend()
         p.show()
 
-    return ystart, ymid, yend, ymid_err
+    return ystart, ymid, yend, ymid_err, fwhm
