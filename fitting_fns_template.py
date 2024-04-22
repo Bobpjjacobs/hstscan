@@ -939,14 +939,14 @@ def lnprior(theta, parameters, names):
     for i,name in enumerate(names):
         if parameters[name]['prior_min'] < theta[i] < parameters[name]['prior_max']:
             if parameters[name]['prior'] == 'gaussian':
-                this_prior = np.exp(-0.5 * (theta[i] - parameters[name]['prior_mu'])**2 /
-                                    (parameters[name]['prior_sigma']**2) )
+                this_prior = (np.log(1.0 /(np.sqrt(2*np.pi) * parameters[name]['prior_sigma'])) -
+                                    0.5*(theta[i] - parameters[name]['prior_mu'])**2 / parameters[name]['prior_sigma']**2)
                 if 'prior_strength' in parameters[name].keys():
                     this_prior *= parameters[name]['prior_strength']
                 if prior == 0.:
                     prior = this_prior
                 else:
-                    prior *= this_prior
+                    prior += this_prior
             elif parameters[name]['prior'] == 'gamma':
                 Theta = np.sqrt(parameters[name]['prior_sigma'] ** 2. / parameters[name]['prior_mu'])
                 k = parameters[name]['prior_mu'] / Theta
@@ -956,12 +956,11 @@ def lnprior(theta, parameters, names):
                 if prior == 0.:
                     prior = this_prior
                 else:
-                    prior *= this_prior
+                    prior += this_prior
         else:
             return -np.inf
 
     return prior
-
 def lnlike(pars, Times, data, Forward, sp_params, orbit_times, satellite_time, exc_egress, t0_not_yet_set, sigma,
            same_depth, same_Rorb, fix_stel_puls_phase, Stel_puls_phase):
     if same_depth and same_Rorb and not fix_stel_puls_phase:
