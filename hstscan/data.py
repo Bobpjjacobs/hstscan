@@ -420,7 +420,7 @@ def load_all_ima(system = 'GJ-1214', source_file='input_image.lis', data_dir='/h
         lines = [line for line in lines if line[-1].startswith(direction)]
     lines = [line[0] for line in lines if line[1].startswith('G')]
     for fname in lines:
-	file = source_dir+fname+'_ima.fits'
+        file = source_dir+fname+'_ima.fits'
         yield load(file)
 
 def load_all_red(system = 'GJ-1214', source_file='input_image.lis', data_dir='/home/jacob/hst_data/', visits=False,
@@ -517,7 +517,7 @@ def find_star_in_catalogue(catalogue, di_name, t, logger):
     :return: The x-coordinate, y-coordinate of the direct image plus the postarg1, postarg2 and PA_V3 arguments of the
              direct image.
     """
-    print "catalogue", catalogue
+    print("catalogue {}".format(catalogue))
     try:
         if os.path.exists(t.source_dir + di_name + '_ima.fits'):
             direct_image = Data_ima(t.source_dir + di_name + '_ima.fits', hst_file=t.hst_eph_file,
@@ -984,7 +984,7 @@ def plot_backgrounds(source_file=None, data_dir = '/net/glados2.science.uva.nl/a
         return times, bgs, bg_errs, colors
 
     else:
-        print 'Warning loading a lot of files'
+        print('Warning loading a lot of files')
         for file in os.listdir(data_dir):
             if file.endswith('_red.fits'):
                 exp = load(data_dir+file)
@@ -1156,9 +1156,9 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
                 nos.append(file[4:6])
 
     nos = sorted(list(set(nos)))
-    print nos
+    print(nos)
     for no in nos:
-        print 'Starting visit', no
+        print('Starting visit {}'.format(no))
         j = 0
         line_dat = []
         for file in os.listdir(data_dir):
@@ -1168,7 +1168,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
                     if imafile in os.listdir(data_dir):
                         #There's an _ima equivalent to this file, so ignore this _drz file
                         continue
-                print file
+                print(file)
                 j += 1
                 exp = load(data_dir + file, bjd=True, hst_file=conf_kwargs['hst_eph_file'],
                             tai_file=conf_kwargs['tai_utc_file'])
@@ -1184,7 +1184,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
                     else:
                         direction = 'forward'
                 line_dat.append([str(rootname), str(filt), str(time), direction])
-                print 'Completed file', j, 'for visit', no
+                print('Completed file {} for visit {}'.format(j, no))
         line_dat.sort()
         lines = '\n'.join(['\t'.join(dat) for dat in line_dat])
         f.silentremove(data_dir+'/visit_'+no+'.lis')
@@ -1192,7 +1192,7 @@ def make_input_image_lists(input_file=None, data_dir='/home/jacob/hst_data/WASP-
         with open(data_dir+'/visit_'+no+'.lis', 'w') as g:
             g.write(lines)
             g.write('\n')
-        print '#####################\nVisit', no, 'completed.\n#####################'
+        print('#####################\nVisit {} completed.\n#####################'.format(no))
 
 def find_catalogue(rootname, logger, data_dir='/home/jacob/hst_data/'):
     '''
@@ -1224,8 +1224,8 @@ def find_catalogue(rootname, logger, data_dir='/home/jacob/hst_data/'):
                     cat = '_'.join(catalogue_split)
                 logger.warning('Replaced catalogue with {}'.format(cat))
             return cat, cat_rootname
-    print data_dir+'input_image.lis'
-    print lines
+    print (data_dir+'input_image.lis')
+    print (lines)
     assert cat_rootname is not None, "No direct image found for {}".format(rootname)
     return cat, cat_rootname
 
@@ -1283,8 +1283,8 @@ def emcee_chain_reader(fname):
         coefs_names = coefs.split(',')
         line = g.readline()[:-1]
         nwalkers, nsteps, ndim = [ int(val) for val in line.split(',')]
-        print 'Chain fit of: {}'.format(', '.join(coefs_names))
-        print '{} walkers, {} steps, {} dim'.format(nwalkers, nsteps, ndim)
+        print ('Chain fit of: {}'.format(', '.join(coefs_names)))
+        print ('{} walkers, {} steps, {} dim'.format(nwalkers, nsteps, ndim))
         chain = np.empty([nwalkers, nsteps, ndim])
         for i, line in enumerate(g):
             line = line[:-2] # trim /n

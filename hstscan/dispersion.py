@@ -442,7 +442,7 @@ def get_yscan(image, x0, nsig=5, debug=False, y0=None, sigma0=5, width0=30, two_
     f1 = interp1d(row_sum[Range < maxindex], Range[Range < maxindex])
     f2 = interp1d(row_sum[Range > maxindex], Range[Range > maxindex])
     fwhm = f2(0.5* np.max(row_sum)) - f1(0.5* np.max(row_sum))
-    print "FWHM of this subexposure is ", fwhm
+    print("FWHM of this subexposure is {}".format(fwhm))
     args = out[0]
     arg_errs = np.sqrt(np.diag(out[1]))
     if two_scans:

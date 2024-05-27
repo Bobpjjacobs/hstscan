@@ -236,7 +236,7 @@ def hist_image_bg(image, debug=False, psf_h=100, masks=2):
     select[pix - psf_h / 2:pix + psf_h / 2, :] = False
     select[:, xpix - 100:xpix + 100] = False
     image[np.logical_not(select)] = 0.
-    if debug: print 'Spec pix', pix
+    if debug: print ('Spec pix {}'.format(pix))
 
     # now remove the bg star spectra if there
     # first two are clear on most images
@@ -244,18 +244,18 @@ def hist_image_bg(image, debug=False, psf_h=100, masks=2):
         mask1, pix = find_box(image, h=40)
         image[pix - 20:pix + 20, :] = 0.
         select[pix - 20:pix + 20] = False
-        if debug: print 'Mask 1', pix
+        if debug: print('Mask 1 {}'.format(pix))
     if masks > 1:
         mask2, pix = find_box(image, h=40)
         image[pix - 20:pix + 20, :] = 0.
         select[pix - 20:pix + 20] = False
-        if debug: print 'Mask 2', pix
+        if debug: print('Mask 2 {}'.format(pix))
     # third varies with telescope position
     if masks > 2:
         mask3, pix = find_box(image, h=40)
         image[pix - 20:pix + 20, :] = 0.
         select[pix - 20:pix + 20] = False
-        if debug: print 'Mask 3', pix
+        if debug: print('Mask 3 {}'.format(pix))
 
     if debug: copy = image.copy(); copy[np.logical_not(select)] = np.nan; view(copy, vmin=0.)
     image = image[select].flatten()
@@ -927,21 +927,21 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
         stellar_W = pyfits.open(t.stellar_wavelengths)[0].data / 10000. #transform to microns.
         Fitsmodel = True
     except:
-        print "The stellar file is not a PHOENIX model."
+        print ("The stellar file is not a PHOENIX model.")
     if Fitsmodel:
         if "PHXVER" in stellar_file.header:
-            print "using a PHOENIX stellar model"
+            print("using a PHOENIX stellar model")
         else:
-            print "Not using a PHOENIX model but a different model."
-            print "Please have a good look at the below plot and check the stellar spectrum."
+            print ("Not using a PHOENIX model but a different model.")
+            print ("Please have a good look at the below plot and check the stellar spectrum.")
             plot = True
         stellar_spec = stellar_file.data
         # The resolution of the stellar spectrum is too high, so we apply a guassian kernel of 20 Angstrom
         if len(stellar_spec)>10000:
             stellar_spec = gaussian_filter(stellar_spec, sigma=t.stel_spec_gauss_kern_sig * 200.)
     else:
-        print "Not using a PHOENIX model but a different model."
-        print "Please have a good look at the below plot and check the stellar spectrum."
+        print ("Not using a PHOENIX model but a different model.")
+        print ("Please have a good look at the below plot and check the stellar spectrum.")
         plot = True
         stellar_file = np.genfromtxt(t.stellar_spectrum, skip_header=1)
         stellar_W = stellar_file.T[0] / 10000. #transform to microns.
@@ -1022,11 +1022,11 @@ def find_xshift_di(exposure, subexposure, direct_image, t, wave_grid, cal_disp_p
     #p.plot(Element2)
     p.show()
     if t.use_2nd_order:
-        print "amplitude and displacement on first order:", amplitude, displacement
-        print "amplitude and displacement on second order:", amplitude, displacement2
-        print "The displacement parameters should be comparable"
+        print("amplitude and displacement on first order: {}".format(amplitude, displacement))
+        print("amplitude and displacement on second order: {}".format(amplitude, displacement2))
+        print("The displacement parameters should be comparable")
     else:
-        print "amplitude and displacement on first order:", amplitude, displacement
+        print("amplitude and displacement on first order: {}".format(amplitude, displacement))
 
 
     #waves_tsiaras = np.linspace(t.ref_wv0, t.ref_wv1, 200)
@@ -1851,7 +1851,7 @@ def custom_transit_params(system='GJ-1214', **kwargs):
 
 
     else:
-        print 'WARNING unsupported system.'
+        print ('WARNING unsupported system.')
     for key in kwargs:
         # Overwrite params or define custom system
         val = kwargs[key]

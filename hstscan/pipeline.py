@@ -14,6 +14,7 @@ from matplotlib.ticker import StrMethodFormatter
 from scipy.optimize import leastsq, curve_fit
 from matplotlib.backends.backend_pdf import PdfPages
 from Telescope_characteristics import HST
+from importlib import reload
 
 import dispersion as disp
 import astropy.io.fits as pyfits

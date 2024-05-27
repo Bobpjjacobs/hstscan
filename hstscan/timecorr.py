@@ -321,7 +321,7 @@ def jdutc2jdtdb(jd_utc, taifile='/Users/bob/Documents/PhD/hstscan/hstscan/src/ta
         except KeyError: umonth = months[umonth.lower()]
     except IOError:
         # no file or something wrong, force update
-        uday, umonth, uyear = 01, 01, 1961
+        uday, umonth, uyear = '01', '01', '1961'
     # get present
     pday, pmonth, pyear = map(int, time.strftime('%d %m %Y').split())
 

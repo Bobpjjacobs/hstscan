@@ -65,10 +65,10 @@ def optimized_spectrum(D, S, P, V, M, debug=False):
     # optimized variance
     fV_opt = np.divide(np.nansum(np.multiply(M,P), axis=0),denom)
     if debug:
-        print denom
+        print(denom)
         #print #np.sum(V), np.sum(np.divide(np.square(P),V))
-        print np.multiply(M, np.divide(np.multiply(P, D - S), V)), denom, f_opt
-        print M
+        print('{} {} {}'.format(np.multiply(M, np.divide(np.multiply(P, D - S), V)), denom, f_opt))
+        print(M)
         #print #np.sum(P), f_opt
     return f_opt, fV_opt
 
@@ -126,7 +126,7 @@ def shift_to_ref(spectra, x, y, t, scan_dir_match, logger, pdf=[], Stretch=True)
             spec.x = x
             spec.y = y
     if Stretch:
-        print x_ref - spectra[s].x
+        print(x_ref - spectra[s].x)
         refshift, refstretch, referr = r.spec_pix_shift(x_ref, y_ref, spectra[s].x, y_spec, norm=True, stretch=True,
                                                         fitpeak=t.peak)
         pixshift = refshift * len(x) / (max(x) - min(x))
@@ -434,9 +434,9 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
         if not tol is None: tol = np.mean(distn)*tol # set the tolerance to n% of the mean flux?
         if tol <= 0 or tol is None: tol=len(distn); logger.info('Tolerance set to default in spline fit for column {}'.format(i))
 
-        if debug and full_debug: print 'Tolerance set to:', tol
+        if debug and full_debug: print('Tolerance set to: {}'.format(tol))
         if not order: order = 3
-        if np.all(weights == np.zeros_like(weights)): print 'panic'
+        if np.all(weights == np.zeros_like(weights)): print('panic')
 
         #if i == 78: print x, distn, weights
         order = int(order)
@@ -479,11 +479,11 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
         #logger.warning('{} iterations, tolerance {}'.format(j, tol))
 
         if debug and False:
-            print 'Tolerance set to:', tol
-            print 'Initial P between {:.2g} and {:.2g}'.format(min(P_l), max(P_l))
-            print 'Variance between {:.2g} and {:.2g} electrons'.format(min(V_l), max(V_l))
-            print 'Weights between {:.2g} and {:.2g}'.format(min(weights), max(weights))
-            print 'Total difference is {}'.format(np.sum(distn-fit))
+            print('Tolerance set to:', tol)
+            print('Initial P between {:.2g} and {:.2g}'.format(min(P_l), max(P_l)))
+            print('Variance between {:.2g} and {:.2g} electrons'.format(min(V_l), max(V_l)))
+            print('Weights between {:.2g} and {:.2g}'.format(min(weights), max(weights)))
+            print('Total difference is {}'.format(np.sum(distn-fit)))
             fit = my_fns.spline(x, results)
             p.plot(distn, marker='o', ls='None')
             p.plot(fit, color='g')
@@ -529,8 +529,8 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
             if res < tol:
                 if success: p.title('Good Result')
                 else: p.title('Failed fit')
-                print 'Knots:', n_knots, '\nCurrent residuals', res, 'tolerance', tol
-                print results[-2], results[-1]
+                print('Knots: {} \nCurrent residuals {} tolerance'.format(n_knots, res, tol))
+                print(results[-2], results[-1])
                 p.plot(x, distn, marker='x', ls='None', color='g')
                 p.plot(x, fit, color='b')
                 p.plot(nodes, fit_nodes, marker='o', color='b', ls='None')
@@ -576,7 +576,7 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
             # Fit spline
             tol = np.mean(y_sp)*tol # set the tolerance to n% of the mean flux?
             if tol <= 0: tol=None
-            if debug and full_debug: print 'Tolerance set to:', tol
+            if debug and full_debug: print('Tolerance set to: {}'.format(tol))
             w_sp = np.ones_like(w_sp) / float(len(w_sp))
             results = UnivariateSpline(x=x_sp,y=y_sp,w=w_sp, s=tol, k=order)
             res, knots = results.get_residual(), len(results.get_knots())
@@ -611,8 +611,8 @@ def FIT_single(x, distn, P_l, V_l, outliers, coef0, func_type, method, tol, orde
             tol = 1.49012e-08 # fix None problem
         if not step:
             step = np.nanmean(distn)*np.sqrt(np.finfo(float).eps) #https://mail.scipy.org/pipermail/scipy-user/2010-July/025975.html
-            print "STEEEEEEEP", step
-        if debug: print 'step size:', step
+            print("STEEEEEEEP {}".format(step))
+        if debug: print('step size: {} '.format(step))
         results = optimize.leastsq(weight_function, coef0, args=(x, distn, weights, func_type, method), full_output=1, ftol=tol, epsfcn=step)
         if debug:
             print(results[-2])
@@ -843,15 +843,15 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                 #print P_l_unscaled - P_l2_unscaled, order
                 #print f_l, "pl", np.sum(f_l), np.sum(distn) / np.max(distn)
                 if custom_knots is None:
-                    print "Knots estimated by pipeline are:", knots
+                    print("Knots estimated by pipeline are: {}".format(knots))
                 else:
-                    print "Knots used are:", knots
+                    print("Knots used are: {}".format(knots))
 
                 #print P_l_unscaled
                 xjes = np.arange(len(distn))
                 if slope_second_order:
-                    print np.arange(len(distn))[On_Slope]
-                    print custom_knots
+                    print(np.arange(len(distn))[On_Slope])
+                    print(custom_knots)
                     p.plot(xjes[On_Slope], distn[On_Slope], 'o', color='g', label='slope')
                     p.plot(xjes[(M.T[i].astype(bool)) & ~(On_Slope)], distn[(M.T[i].astype(bool)) & ~(On_Slope)], 'o', color='b')
                 else:
@@ -912,7 +912,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
                     if np.any(cr_l == 0):
                         p.plot(-1,0,marker='o', mec='y', mfc='y', ls='None', label='CR pixels')
                     if np.any(np.logical_not(M_l) != new_outliers):
-                        print np.count_nonzero(np.logical_not(M_l) != new_outliers), ' pixels clipped'
+                        print('{} pixels clipped'.format(np.count_nonzero(np.logical_not(M_l) != new_outliers)))
                         p.plot(-1,0,marker='o', mec='r', mfc='None', ls='None', label='Sigma Clipped')
                     if func_type == 'split_spline':
                         ind1 = len(x_split[0])
@@ -976,8 +976,8 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         V[:,i] = V_l.copy()
         if f_l > 3.e6 and False:
             p.plot(P_l / np.median(P_l) * np.median(distn))
-            print M_DQ[:,i].astype(bool)
-            print M_CR[:,i].astype(bool)
+            print(M_DQ[:,i].astype(bool))
+            print(M_CR[:,i].astype(bool))
             Good = M_DQ[:,i].astype(bool)
             Good[np.logical_not(M_CR[:,i].astype(bool))] = False
             Bad = np.logical_not(Good)
@@ -991,7 +991,7 @@ def FIT(D, V_0, Q, f, fV, P, S, V, s_clip, func_type, method, debug, tol, step, 
         #fail_list.extend([90,91,92])
         if i in fail_list and i != 0 and np.mean(D[:,i]) > 1000.: #Extraction failed in a column that is not part of the background
             D_col = D[:,i]
-            print f[i]
+            print(f[i])
             D_col1 = D[:,i-1]
             Good = M_DQ[:,i].astype(bool)
             Bad = np.logical_not(M_DQ[:,i].astype(bool))

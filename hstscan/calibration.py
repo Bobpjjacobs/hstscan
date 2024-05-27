@@ -121,10 +121,10 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, order=1
             # x, y = center_of_flux(image_fname, int(SEx), int(SEy), size=10)
 
             if debug:
-                print 'Direct image location:', x, y
-                print 'Offset from SExtractor:', x - SEx, y - SEy
-                print 'External offset and scan:', XOFF, YOFF
-                print 'Final:', x + XOFF, y + YOFF
+                print('Direct image location: {} {}'.format(x, y))
+                print('Offset from SExtractor: {} {}'.format(x - SEx, y - SEy))
+                print('External offset and scan: {} {}'.format(XOFF, YOFF))
+                print('Final: {} {}'.format(x + XOFF, y + YOFF))
             XREF, YREF = x + XOFF, y + YOFF  # including offsets
     else:
         XREF, YREF = x + XOFF, y + YOFF
@@ -196,7 +196,7 @@ def disp_poly(conf_file, catalogue, exp_time, scan_rate, scan_direction, order=1
             field_coeff = field_dep_coeff(m, coeffs, x, y)
             if plot_coeffs:
                 view(field_coeff, title='Coefficient {}'.format(i))
-            if debug: print '{:.4g} * X ^ {:}'.format(np.mean(field_coeff), i)
+            if debug: print('{:.4g} * X ^ {:}'.format(np.mean(field_coeff), i))
             total_poly = total_poly + np.multiply(np.power(x_trace, i), field_coeff)
         return total_poly
 
